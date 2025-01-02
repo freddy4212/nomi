@@ -11,7 +11,7 @@ APPL_DEFINES += -DDBG_MORE -fno-threadsafe-statics -std=c++17
 # Add new library here
 # The source code should be loacted in ~\library\{lib_name}\
 ##
-LIB_SEL = pwrmgmt tflmtag2209_u55tag2205 spi_eeprom sensordp fatfs sscma_micro
+LIB_SEL = pwrmgmt tflmtag2412_u55tag2411 spi_eeprom sensordp fatfs sscma_micro
 ##
 # middleware support feature
 # Add new middleware here

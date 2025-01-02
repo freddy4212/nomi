@@ -62,17 +62,20 @@ SECTIONS
         . = ALIGN(8);
         *libdriver.*:*(.text* .rodata*)
 
-        // . = ALIGN(8);
-        // *libfatfs.*:*(.text* .rodata*)
-
-        // . = ALIGN(8);
-        // *libcommon.*:*(.text* .rodata*)
-
-        // . = ALIGN(8);
-        // *libcmsis_drivers.*:*(.text* .rodata*)
+        //. = ALIGN(8);
+        //*libfatfs.*:*(.text* .rodata*)
 
         . = ALIGN(8);
-        *libsensordp.*:*(.text* .rodata*)
+        *libcommon.*:*(.text* .rodata*)
+
+        //. = ALIGN(8);
+        //*libcmsis_drivers.*:*(.text* .rodata*)
+
+        . = ALIGN(8);
+        *lib_cmsis_nn_7_0_0.*:*(.text* .rodata*)
+
+        //. = ALIGN(8);
+        //*libsensordp.*:*(.text* .rodata*)
 
         . = ALIGN(8);
         *lib_i2c_comm.*:*(.text* .rodata*)
@@ -96,7 +99,7 @@ SECTIONS
         *libsscma_micro.*:*(.text* .rodata*)
         
         // . = ALIGN(8);
-        // *libtflmtag2209_u55tag2205_gnu.*:*(.text* .rodata*)
+        // *libtflmtag2412_u55tag2411_cmsisnn_gnu.*:*(.text* .rodata*)
 
     } > CM55M_S_APP_DATA
 

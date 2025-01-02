@@ -59,38 +59,47 @@ SECTIONS
 
     .text.ext :
     {
-        . = ALIGN(4);
+        . = ALIGN(8);
         *libdriver.*:*(.text* .rodata*)
 
-        // . = ALIGN(4);
-        // *libfatfs.*:*(.text* .rodata*)
+        //. = ALIGN(8);
+        //*libfatfs.*:*(.text* .rodata*)
 
-        // . = ALIGN(4);
-        // *libcommon.*:*(.text* .rodata*)
+        . = ALIGN(8);
+        *libcommon.*:*(.text* .rodata*)
 
-        . = ALIGN(4);
+        . = ALIGN(8);
+        *libcmsis_drivers.*:*(.text* .rodata*)
+
+        . = ALIGN(8);
+        *lib_cmsis_nn_7_0_0.*:*(.text* .rodata*)
+
+        . = ALIGN(8);
+        *libsensordp.*:*(.text* .rodata*)
+
+        . = ALIGN(8);
         *lib_i2c_comm.*:*(.text* .rodata*)
 
-        . = ALIGN(4);
+        . = ALIGN(8);
         *lib_img_proc.*:*(.text* .rodata*)
 
-        . = ALIGN(4);
+        . = ALIGN(8);
         *lib_spi_eeprom.*:*(.text* .rodata*)
 
-        . = ALIGN(4);
+        . = ALIGN(8);
         *lib_spi_psram.*:*(.text* .rodata*)
 
-        . = ALIGN(4);
+        . = ALIGN(8);
         *lib_spi_ptl.*:*(.text* .rodata*)
 
-        . = ALIGN(4);
+        . = ALIGN(8);
         *libaudio.*:*(.text* .rodata*)
 
-        . = ALIGN(4);
+        . = ALIGN(8);
         *libsscma_micro.*:*(.text* .rodata*)
         
-        // . = ALIGN(4);
-        // *libtflmtag2209_u55tag2205_gnu.*:*(.text* .rodata*)
+        // . = ALIGN(8);
+        // *libtflmtag2412_u55tag2411_cmsisnn_gnu.*:*(.text* .rodata*)
 
     } > CM55M_S_APP_DATA
 
