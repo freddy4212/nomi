@@ -24,8 +24,9 @@
 #include "tensorflow/lite/micro/micro_interpreter.h"
 #include "tensorflow/lite/schema/schema_generated.h"
 #include "tensorflow/lite/c/common.h"
+#if TFLM2209_U55TAG2205
 #include "tensorflow/lite/micro/micro_error_reporter.h"
-
+#endif
 #include "img_proc_helium.h"
 #include "yolo_postprocessing.h"
 
@@ -171,8 +172,9 @@ int cv_yolov8n_ob_init(bool security_enable, bool privilege_enable, uint32_t mod
 		else {
 			xprintf("yolov8n_ob model's schema version %d\n", yolov8n_ob_model->version());
 		}
-
+		#if TFLM2209_U55TAG2205
 		static tflite::MicroErrorReporter yolov8n_ob_micro_error_reporter;
+		#endif
 		static tflite::MicroMutableOpResolver<2> yolov8n_ob_op_resolver;
 
 		yolov8n_ob_op_resolver.AddTranspose();
@@ -631,6 +633,9 @@ hx_drv_swreg_aon_get_appused1(&judge_case_data);
 g_trans_type = (judge_case_data>>16);
 if( g_trans_type == 0 || g_trans_type == 2)// transfer type is (UART) or (UART & SPI) 
 {
+	//invalid dcache to let uart can send the right jpeg img out
+	hx_InvalidateDCache_by_Addr((volatile void *)app_get_jpeg_addr(), sizeof(uint8_t) *app_get_jpeg_sz());
+
 	el_img_t temp_el_jpg_img = el_img_t{};
 	temp_el_jpg_img.data = (uint8_t *)app_get_jpeg_addr();
 	temp_el_jpg_img.size = app_get_jpeg_sz();

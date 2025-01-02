@@ -96,7 +96,10 @@ EPII_NSC_SEL = cm55m_nsc_cfg
 # 1 for enable
 # other for disable
 ##
-LIB_CMSIS_NN_ENALBE = 0
+LIB_CMSIS_NN_ENALBE = 1
+## 0 : default version (tflmtag2209_u55tag2205)
+## 7_0_0 : cmsis_nn_7_0_0 (tflmtag2412_u55tag2411)
+LIB_CMSIS_NN_VERSION = 7_0_0
 
 # USING Pre-built CV library
 # 1 for enable
@@ -129,15 +132,27 @@ CUSTOMER ?= seeed
 
 # PS: As follow are scenario_app app name should be the same as directory name
 # allon_sensor_tflm
+# allon_sensor_tflm_cmsis_nn (LIB_CMSIS_NN_ENALBE = 1)
 # allon_sensor_tflm_fatfs
 # allon_sensor_tflm_freertos
+# allon_jpeg_encode
 # fatfs_mmc_spi
 # hello_world_freertos_tz_s_only
 # tflm_fd_fm
 # tflm_yolov8_od
 # tflm_yolov8_pose
+# pdm_record
+# imu_read
+# hello_world_cmsis_dsp
+# hello_world_cmsis_cv
+# kws_pdm_record
+# ei_standalone_inferencing
+# ei_standalone_inferencing_camera
+# edge_impulse_firmware
+# tflm_peoplenet
+# tflm_yolo11_od
 ##
-#APP_TYPE = allon_sensor_tflm_freertos
+#APP_TYPE = allon_sensor_tflm
 APP_TYPE = sscma
  
 ### Options above must be added before include options.mk ###

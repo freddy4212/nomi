@@ -24,8 +24,9 @@
 #include "tensorflow/lite/micro/micro_interpreter.h"
 #include "tensorflow/lite/schema/schema_generated.h"
 #include "tensorflow/lite/c/common.h"
+#if TFLM2209_U55TAG2205
 #include "tensorflow/lite/micro/micro_error_reporter.h"
-
+#endif
 #include "img_proc_helium.h"
 
 
@@ -132,7 +133,11 @@ static int _arm_npu_init(bool security_enable, bool privilege_enable)
     _arm_npu_irq_init();
 
     /* Initialise Ethos-U55 device */
-    const void * ethosu_base_address = (void *)(U55_BASE);
+#if TFLM2209_U55TAG2205
+	const void * ethosu_base_address = (void *)(U55_BASE);
+#else 
+	void * const ethosu_base_address = (void *)(U55_BASE);
+#endif
 
     if (0 != (err = ethosu_init(
                             &ethosu_drv,             /* Ethos-U driver device pointer */
@@ -310,8 +315,9 @@ int cv_yolov8_pose_init(bool security_enable, bool privilege_enable, uint32_t mo
 		else {
 			xprintf("yolov8_pose_model model's schema version %d\n", yolov8_pose_model->version());
 		}
-
+		#if TFLM2209_U55TAG2205
 		static tflite::MicroErrorReporter yolov8_pose_micro_error_reporter;
+		#endif
 		static tflite::MicroMutableOpResolver<2> yolov8_pose_op_resolver;
 
         yolov8_pose_op_resolver.AddTranspose();
@@ -319,10 +325,13 @@ int cv_yolov8_pose_init(bool security_enable, bool privilege_enable, uint32_t mo
 			xprintf("Failed to add Arm NPU support to op resolver.");
 			return false;
 		}
-
+		#if TFLM2209_U55TAG2205
 		static tflite::MicroInterpreter yolov8_pose_static_interpreter(yolov8_pose_model, yolov8_pose_op_resolver,
 				(uint8_t*)tensor_arena, tensor_arena_size, &yolov8_pose_micro_error_reporter);
-
+		#else
+		static tflite::MicroInterpreter yolov8_pose_static_interpreter(yolov8_pose_model, yolov8_pose_op_resolver,
+				(uint8_t*)tensor_arena, tensor_arena_size);
+		#endif
 		if(yolov8_pose_static_interpreter.AllocateTensors()!= kTfLiteOk) {
 			return false;
 		}
@@ -806,6 +815,9 @@ hx_drv_swreg_aon_get_appused1(&judge_case_data);
 g_trans_type = (judge_case_data>>16);
 if( g_trans_type == 0 || g_trans_type == 2)// transfer type is (UART) or (UART & SPI) 
 {	
+	//invalid dcache to let uart can send the right jpeg img out
+	hx_InvalidateDCache_by_Addr((volatile void *)app_get_jpeg_addr(), sizeof(uint8_t) *app_get_jpeg_sz());
+
 	el_img_t temp_el_jpg_img = el_img_t{};
 	temp_el_jpg_img.data = (uint8_t *)app_get_jpeg_addr();
 	temp_el_jpg_img.size = app_get_jpeg_sz();

@@ -1,13 +1,36 @@
-# macOS
-.DS_Store
+# Prerequisites
+*.d
 
-# VScode
-.vscode
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
 
-# Logs
-*.log
+# Precompiled Headers
+*.gch
+*.pch
 
-# Output files
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+*.smod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# Various build files
 we2_image_gen_local/secureboot_tool/sb_content_cert.log
 we2_image_gen_local/secureboot_tool/cert/ICVSBContent_Cert.txt
 we2_image_gen_local/secureboot_tool/cert/ICVSBContent.crt
@@ -18,4 +41,8 @@ we2_image_gen_local/output_case1_sec_wlcsp/**
 we2_image_gen_local/Images_ForSendData.txt
 we2_image_gen_local/Images.txt
 
+*.elf
+*.map
 *.img
+
+.vscode/

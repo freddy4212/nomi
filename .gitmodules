@@ -1,3 +1,9 @@
 [submodule "EPII_CM55M_APP_S/library/sscma_micro"]
 	path = EPII_CM55M_APP_S/library/sscma_micro
 	url = https://github.com/Seeed-Studio/SSCMA-Micro.git
+[submodule "EPII_CM55M_APP_S/library/cmsis_cv/CMSIS-CV"]
+	path = EPII_CM55M_APP_S/library/cmsis_cv/CMSIS-CV
+	url = https://github.com/ARM-software/CMSIS-CV.git
+[submodule "EPII_CM55M_APP_S/library/cmsis_cv/CMISI-CV"]
+	path = EPII_CM55M_APP_S/library/cmsis_cv/CMISI-CV
+	url = https://github.com/ARM-software/CMSIS-CV.git

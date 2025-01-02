@@ -3,6 +3,7 @@
 #include "WE2_debug.h"
 #include "hx_drv_scu.h"
 #include "hx_drv_swreg_aon.h"
+#include "driver_interface.h"
 #ifdef IP_sensorctrl
 #include "hx_drv_sensorctrl.h"
 #endif
@@ -50,11 +51,13 @@
 #endif
 #endif
 
+#include "common_config.h"
 #include "app_msg.h"
 #include "app_state.h"
 #include "dp_task.h"
 #include "comm_task.h"
 #include "algo_task.h"
+#include "cvapp.h"
 #include "sleep_mode.h"
 #include "pinmux_cfg.h"
 
@@ -78,9 +81,6 @@
 #define MAIN_TASK_QUEUE_LEN   		10
 #define ALGO_TASK_QUEUE_LEN   		10
 #define VAD_BUFF_SIZE  				2048
-#define ENTER_SLEEP_MODE			1		// 0 : always on, 1 : enter Sleep mode
-#define SENSOR_AE_STABLE_CNT		10
-#define ENTER_PMU_MODE_FRAME_CNT	1
 
 volatile APP_MAIN_TASK_STATE_E g_maintask_state = APP_MAIN_TASK_STATE_UNINIT;
 volatile APP_ALGO_TASK_STATE_E g_algotask_state = APP_ALGO_TASK_STATE_UNINIT;
@@ -94,6 +94,8 @@ QueueHandle_t     xAlgoTaskQueue;
 
 uint32_t g_algo_done_frame = 0;
 uint32_t g_enter_pmu_frame_cnt = 0;
+
+extern void app_start_state(APP_STATE_E state);
 
 /*******************************************************************************
  * Prototypes
