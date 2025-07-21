@@ -151,9 +151,10 @@ CUSTOMER ?= seeed
 # edge_impulse_firmware
 # tflm_peoplenet
 # tflm_yolo11_od
+# libmpix_sample
 ##
 #APP_TYPE = allon_sensor_tflm
-APP_TYPE = sscma
+APP_TYPE = libmpix_sample
  
 ### Options above must be added before include options.mk ###
 override EPII_ROOT := $(strip $(subst \,/,$(EPII_ROOT)))

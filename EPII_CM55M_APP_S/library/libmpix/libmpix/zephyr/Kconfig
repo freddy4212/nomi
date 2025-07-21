@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: Apache-2.0
+
+menuconfig MPIX
+	bool "Pixel and Image Manipulation Library"
+	imply RING_BUFFER_LARGE
+
+if MPIX
+
+config MPIX_HEAP_SIZE
+	int "Size in bytes for use in pixel operations intermediate buffers"
+	default 4096
+	help
+	  Every time an operation is performed on an image, intermediate buffers matching the
+	  line width are allocated. This configures how much memory to use for it.
+	  The default is enough for a few conversion for small frames.
+
+module = MPIX
+module-str = pixel
+source "subsys/logging/Kconfig.template.log_config"
+
+endif

@@ -405,3 +405,14 @@ int main(void)
 }
 #endif
 
+#ifdef LIBMPIX_SAMPLE
+#include "libmpix_sample.h"
+/** main entry */
+int main(void)
+{ 
+	board_init(); 
+	app_main(); 
+	return 0; 
+} 
+#endif 
+ 

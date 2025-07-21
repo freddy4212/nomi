@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<doxygenlayout version="1.0">
+  <navindex>
+    <tab type="mainpage" visible="yes" title="Introduction"/>
+    <tab type="pages"    visible="yes" title="Documentation"/>
+    <tab type="topics"   visible="yes" title="API"/>
+    <tab type="modules"  visible="yes" title="API"/>
+    <tab type="user"     visible="yes" title="Git" url="https://github.com/libmpix/libmpix"/>
+  </navindex>
+</doxygenlayout>

@@ -7,6 +7,8 @@ else
 LIB_REQUIRED = common
 endif
 
+LIB_REQUIRED += libmpix
+
 ifeq ($(LIB_CMSIS_NN_ENALBE), 1)
 override LIB_CMSIS_NN_VERSION := $(strip $(LIB_CMSIS_NN_VERSION))
 ifeq ($(LIB_CMSIS_NN_VERSION), 0)

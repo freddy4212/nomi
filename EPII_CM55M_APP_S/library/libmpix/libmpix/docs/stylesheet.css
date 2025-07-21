@@ -1,0 +1,113 @@
+:root {
+	--nav-text-hover-color: black;
+	--header-gradient-image: none;
+	--memdef-border-color: none;
+	--memdef-proto-background-color: none;
+	--memdef-title-gradient-image: none;
+	--memdef-title-background-color: none;
+	--memdef-proto-text-shadow: none;
+	--memdef-doc-background-color: none;
+}
+
+body {
+	max-width: 1000px;
+	margin: auto;
+	margin-bottom: 128px;
+	padding-left: 5%;
+	padding-right: 5%;
+}
+
+body, table, div, p, dl, #projectbrief, .sm-dox a, .sm-dox a:hover  {
+	font-size: 16px;
+}
+
+#titlearea {
+	border: none;
+	padding-top: 32px;
+}
+
+#projectbrief {
+	padding-left: 16px;
+}
+
+#projectname, #projectbrief {
+	display: inline-block;
+}
+
+#projectlogo img {
+	width: 512px;
+	max-width: 100%;
+}
+
+#MSearchBox {
+	box-shadow: none;
+	border-radius: 0px;
+}
+
+#doc-content {
+	height: auto !important;
+	padding-bottom: 64px;
+}
+
+div.header, div.memitem {
+	border-top: solid 1px var(--group-header-separator-color);
+	border-bottom: solid 1px var(--group-header-separator-color);
+}
+
+div.memitem, div.contents, h1, h2, h3, h4, h5, h6 {
+	margin-right: 0px;
+	margin-left: 0px;
+	padding-left: 0px;
+	padding-right: 0px;
+}
+
+div.memitem > * {
+	padding-left: 16px;
+	padding-right: 16px;
+}
+
+.sm-dox {
+	background: none;
+	padding-left: 0px;
+	padding-right: 0px;
+}
+
+.sm-dox a, .sm-dox a:focus, .sm-dox a:active, .sm-dox a:hover, .sm-dox a.highlighted {
+	background: none;
+}
+
+.sm-dox a, .sm-dox a:focus, .sm-dox a:hover, .sm-dox a:active {
+	text-shadow: none;
+	outline: none;
+}
+
+div.fragment {
+	padding: 16px;
+}
+
+.memdoc, .memproto {
+	box-shadow: none;
+	background-image: none;
+	border: none;
+}
+
+.memitem {
+	padding: 8px;
+	background: rgba(100, 130, 180, 0.04);
+
+}
+
+.memtitle {
+	background: none;
+	border: none;
+}
+
+.permalink a, .permalink a:visited {
+	color: var(--index-separator-color);
+}
+
+dl.note {
+	border: none;
+	margin: inherit;
+	/* background-color: ; */
+}

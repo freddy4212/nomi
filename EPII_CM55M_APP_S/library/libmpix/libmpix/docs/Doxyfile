@@ -1,0 +1,19 @@
+PROJECT_NAME		= libmpix
+PROJECT_BRIEF		= The open imaging DSP library
+OPTIMIZE_OUTPUT_FOR_C	= YES
+SHOW_FILES		= NO
+SHOW_NAMESPACES		= NO
+EXTRACT_STATIC		= YES
+INPUT			= . ../include
+IMAGE_PATH		= img
+DOTFILE_DIRS		= .
+PROJECT_LOGO		= img/libmpmix_logo_light_background.png
+RECURSIVE		= YES
+SEARCH_INCLUDES		= YES
+USE_MDFILE_AS_MAINPAGE	= index.md
+HTML_EXTRA_STYLESHEET	= stylesheet.css
+HTML_HEADER		= header.html
+HTML_FOOTER		= footer.html
+
+DISABLE_INDEX		= NO
+GENERATE_TREEVIEW	= NO
