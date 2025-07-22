@@ -75,7 +75,7 @@ static inline size_t mpix_op_pitch(struct mpix_base_op *op)
  */
 static inline void *mpix_op_by_format(void *list, uint32_t fourcc_src, uint32_t fourcc_dst)
 {
-	struct mpix_base_op **op_list = list;
+	struct mpix_base_op **op_list = (struct mpix_base_op**)list;     
 
 	for (size_t i = 0; op_list[i] != NULL; i++) {
 		if (op_list[i]->fourcc_src == fourcc_src &&

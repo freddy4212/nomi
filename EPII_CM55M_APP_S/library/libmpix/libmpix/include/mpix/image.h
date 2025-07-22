@@ -313,7 +313,7 @@ void mpix_image_hexdump(struct mpix_image *img);
  * @param threshold Minimum number of bytes the operation needs to run one cycle.
  * @return 0 on success or negative error code.
  */
-int mpix_image_append_op(struct mpix_image *img, const struct mpix_base_op *template,
+int mpix_image_append_op(struct mpix_image *img, const struct mpix_base_op *templated,
 			 size_t op_sz, size_t buf_sz, size_t threshold);
 
 /**
