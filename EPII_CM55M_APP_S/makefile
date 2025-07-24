@@ -152,9 +152,10 @@ CUSTOMER ?= seeed
 # tflm_peoplenet
 # tflm_yolo11_od
 # libmpix_sample
+# libmpix_camera
 ##
 #APP_TYPE = allon_sensor_tflm
-APP_TYPE = libmpix_sample
+APP_TYPE = libmpix_camera
  
 ### Options above must be added before include options.mk ###
 override EPII_ROOT := $(strip $(subst \,/,$(EPII_ROOT)))

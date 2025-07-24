@@ -7,7 +7,15 @@ else
 LIB_REQUIRED = common
 endif
 
+ifeq ($(APP_TYPE), libmpix_sample)
 LIB_REQUIRED += libmpix
+endif
+
+ifeq ($(APP_TYPE), libmpix_camera)
+LIB_REQUIRED += libmpix
+LIB_REQUIRED += JPEGENC
+endif
+
 
 ifeq ($(LIB_CMSIS_NN_ENALBE), 1)
 override LIB_CMSIS_NN_VERSION := $(strip $(LIB_CMSIS_NN_VERSION))
