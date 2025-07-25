@@ -61,6 +61,7 @@
 #include "libmpix_camera.h"
 
 #include <mpix/image.h>
+#include <mpix/auto.h>
 
 #define SPI_SEN_PIC_CLK				(10000000)
 
@@ -339,6 +340,56 @@ void save_rgb_to_bmp(uint8_t* bmp_data, int width, int height, const char* filen
     fastfs_write_image(bmp_data, file_header.bfSize, filename);
 }
 
+int libmpix_process(uint8_t *buf_in, int width, int height, uint8_t channels, uint8_t *buf_out, uint32_t fourcc)
+{
+    struct mpix_image img;
+    struct mpix_stats stats;
+    struct mpix_auto_ctrls auto_ctrls;
+
+    mpix_image_from_buf(&img, buf_in, (width*height*channels), width, height, fourcc);
+
+    stats.nvals = 1000;
+    mpix_image_stats(&img, &stats);
+    mpix_auto_black_level(&auto_ctrls, &stats);
+    mpix_auto_white_balance(&auto_ctrls, &stats);
+
+    uint8_t black_level = auto_ctrls.correction.black_level.level;
+    uint16_t red_level = auto_ctrls.correction.white_balance.red_level; 
+    uint16_t blue_level = auto_ctrls.correction.white_balance.blue_level; 
+    // uint8_t gamma = auto_ctrls.correction.gamma.level;
+
+    switch (fourcc)
+    {
+	case MPIX_FMT_SRGGB8:
+    case MPIX_FMT_SBGGR8:
+        mpix_image_debayer(&img, 2);
+        break;
+
+    default:
+        break;
+    }
+
+    union mpix_correction_any bl = {.black_level = {.level = black_level}};
+	union mpix_correction_any wb = {.white_balance = {.red_level = red_level, .blue_level = blue_level}};
+	// union mpix_correction_any gc = {.gamma = {.level = gamma}};
+
+	mpix_image_correction(&img, MPIX_CORRECTION_BLACK_LEVEL, &bl);
+	mpix_image_correction(&img, MPIX_CORRECTION_WHITE_BALANCE, &wb);
+    // mpix_image_correction(&img, MPIX_CORRECTION_GAMMA, &gc);
+
+    mpix_image_kernel(&img, MPIX_KERNEL_GAUSSIAN_BLUR, 3); 
+    mpix_image_kernel(&img, MPIX_KERNEL_SHARPEN, 3);
+    
+    mpix_image_convert(&img, MPIX_FMT_RGB24);
+	mpix_image_to_buf(&img, buf_out, width*height*3);
+
+	if (img.err != 0) {
+		printf("Oops an error occured: %s!\n", strerror(-img.err));
+		return -1;
+	}
+
+}
+
 void app_setup_dplib_4_yuv_then_jpg() {
 	uint32_t jpeg_enc_filesize;
 	uint32_t jpeg_enc_addr;
@@ -346,11 +397,6 @@ void app_setup_dplib_4_yuv_then_jpg() {
 	uint32_t w, h;
 	uint32_t raw_size;
 	char filename[20];
-
-	struct mpix_image img;
-	union mpix_correction_any bl = {.black_level = {.level = 0x0f}};
-	union mpix_correction_any wb = {.white_balance = {.red_level = 2048, .blue_level = 2048}};
-	union mpix_correction_any gc = {.gamma = {.level = 240}};
 
 	if (cisdp_sensor_init() < 0)
 	{
@@ -379,18 +425,13 @@ void app_setup_dplib_4_yuv_then_jpg() {
 			
 			printf("w: %d, h: %d, raw_size: %d\n", w, h, raw_size);
 			copy_mem_to_mem(cisdp_get_raw_addr(), cisdp_get_quater_raw_addr(), w, h, 0, 0, w, h);
-			
-			mpix_image_from_buf(&img, (const uint8_t*)cisdp_get_quater_raw_addr(), raw_size, w, h, MPIX_FMT_SBGGR8);
-			mpix_image_debayer(&img, 2);
-			
-			mpix_image_correction(&img, MPIX_CORRECTION_BLACK_LEVEL, &bl);
-			mpix_image_correction(&img, MPIX_CORRECTION_WHITE_BALANCE, &wb);
-			mpix_image_correction(&img, MPIX_CORRECTION_GAMMA, &gc);
-			mpix_image_kernel(&img, MPIX_KERNEL_DENOISE, 3);
 
-			mpix_image_convert(&img, MPIX_FMT_RGB24);
-			mpix_image_to_buf(&img, &buf_out[54], raw_size*3);
+			xsprintf(filename, "image%04d.raw", g_cur_frame);
+			fastfs_write_image((uint8_t*)cisdp_get_quater_raw_addr(), raw_size, filename);
 
+			libmpix_process((uint8_t*)cisdp_get_quater_raw_addr(), w, h, 1, &buf_out[54], MPIX_FMT_SRGGB8);
+
+			memset(filename, 0, 20);
 			xsprintf(filename, "image%04d.bmp", g_cur_frame);
 			save_rgb_to_bmp(buf_out, w, h, filename);
 			

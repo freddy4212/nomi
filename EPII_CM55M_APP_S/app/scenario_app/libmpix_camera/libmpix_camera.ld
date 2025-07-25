@@ -8,7 +8,7 @@ MEMORY
   CM55M_S_SRAM2 (rwx) : ORIGIN = 0x36000000, LENGTH = 0x00060000 /* 384K bytes*/ 
 }
 
-__HEAP_SIZE = 0x4000;
+__HEAP_SIZE = 0x6000;
 __STACK_SIZE = 0x4000;
 
 ENTRY(Reset_Handler)
