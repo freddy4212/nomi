@@ -54,6 +54,7 @@
 #include "powermode.h"
 #include "spi_fatfs.h"
 #include "BITOPS.h"
+#include "hx_drv_CIS_common.h"
 
 #include "cisdp_sensor.h"
 #include "event_handler.h"
@@ -62,6 +63,19 @@
 
 #include <mpix/image.h>
 #include <mpix/auto.h>
+
+// #define ov5674_sensor
+#ifdef ov5674_sensor
+#define SENSOR_EXPOSURE_SETTING 1000
+#else
+#define SENSOR_EXPOSURE_SETTING IMX219_EXPOSURE_SETTING
+#endif
+
+typedef struct IMX219_Dev
+{
+	int sensor;
+}imx219_dev;
+imx219_dev imx219 = {.sensor = 0};
 
 #define SPI_SEN_PIC_CLK				(10000000)
 
@@ -99,6 +113,7 @@ void dp_var_init()
 static void app_dplib_cb(SENSORDPLIB_STATUS_E event)
 {
 	uint32_t de0_count, conv_count;
+	printf("event = %d\n", event);
 	dbg_printf(DBG_MORE_INFO, "event = %d\n", event);
 
 	if(event != SENSORDPLIB_STATUS_TIMER_FIRE_APP_NOTREADY)
@@ -285,7 +300,7 @@ void app_dump_single_jpeginfo(uint32_t *jpeg_enc_filesize, uint32_t *jpeg_enc_ad
     dbg_printf(DBG_MORE_INFO, "current frame_no=%d, jpeg_size=0x%x,addr=0x%x\n",frame_no,*jpeg_enc_filesize,*jpeg_enc_addr);
 }
 
-__attribute__(( section(".bss.NoInit"))) uint8_t buf_out[54+640*480*3] __ALIGNED(32);
+__attribute__(( section(".bss.NoInit"))) uint8_t buf_out[54+(640*480*3)] __ALIGNED(32);
 
 #pragma pack(push, 1)
 typedef struct {
@@ -344,12 +359,18 @@ int libmpix_process(uint8_t *buf_in, int width, int height, uint8_t channels, ui
 {
     struct mpix_image img;
     struct mpix_stats stats;
-    struct mpix_auto_ctrls auto_ctrls;
+	uint64_t tick_us;
+
+    static struct mpix_auto_ctrls auto_ctrls = {.dev = &imx219, .exposure_level = SENSOR_EXPOSURE_SETTING, .exposure_max = 0xCFFF};
 
     mpix_image_from_buf(&img, buf_in, (width*height*channels), width, height, fourcc);
 
     stats.nvals = 1000;
     mpix_image_stats(&img, &stats);
+
+	// mpix_auto_exposure_init(&auto_ctrls, NULL);
+	mpix_auto_exposure_control(&auto_ctrls, &stats);
+
     mpix_auto_black_level(&auto_ctrls, &stats);
     mpix_auto_white_balance(&auto_ctrls, &stats);
 
@@ -390,7 +411,8 @@ int libmpix_process(uint8_t *buf_in, int width, int height, uint8_t channels, ui
 
 }
 
-void app_setup_dplib_4_yuv_then_jpg() {
+void run_libmpix_camera(void)
+{
 	uint32_t jpeg_enc_filesize;
 	uint32_t jpeg_enc_addr;
 	uint32_t read_status;
@@ -405,13 +427,15 @@ void app_setup_dplib_4_yuv_then_jpg() {
 	}
 
 	dp_var_init();
-	
+#ifdef ov5674_sensor
 	if (cisdp_dp_init(true, CISDP_INIT_TYPE_INP_CROP_1280x960_RAW, SENSORDPLIB_PATH_INP_WDMA2, app_dplib_cb, 4) < 0)
+#else 
+	if(cisdp_dp_init(true, 1, SENSORDPLIB_PATH_INP_WDMA2, app_dplib_cb, 0) < 0)
+#endif
 	{
 		dbg_printf(DBG_MORE_INFO, "\r\nDATAPATH nonAOS Init fail- cisdp_dp_init\r\n");
 		APP_BLOCK_FUNC();
 	}
-	
 	cisdp_sensor_start();
 
 	while( 1 )
@@ -435,7 +459,11 @@ void app_setup_dplib_4_yuv_then_jpg() {
 			xsprintf(filename, "image%04d.bmp", g_cur_frame);
 			save_rgb_to_bmp(buf_out, w, h, filename);
 			
-			if (cisdp_dp_init(false, CISDP_INIT_TYPE_INP_CROP_1280x960_RAW, SENSORDPLIB_PATH_INP_WDMA2, app_dplib_cb, 4) < 0)
+		#ifdef ov5674_sensor
+			if (cisdp_dp_init(true, CISDP_INIT_TYPE_INP_CROP_1280x960_RAW, SENSORDPLIB_PATH_INP_WDMA2, app_dplib_cb, 4) < 0)
+		#else 
+			if(cisdp_dp_init(true, 1, SENSORDPLIB_PATH_INP_WDMA2, app_dplib_cb, 0) < 0)
+		#endif 	
 			{
 				dbg_printf(DBG_MORE_INFO, "\r\nDATAPATH nonAOS Init fail- cisdp_dp_init\r\n");
 				APP_BLOCK_FUNC();
@@ -472,7 +500,7 @@ int app_main(void) {
 	fatfs_init();
 #endif
 
-	app_setup_dplib_4_yuv_then_jpg();
+	run_libmpix_camera();
 
 	return 0;
 }

@@ -15,6 +15,8 @@
 #include "timers.h"
 #endif
 
+#include "hx_drv_CIS_common.h"
+
 uint32_t mpix_port_get_uptime_us(void)
 {
 	int time = 1;
@@ -56,7 +58,16 @@ int mpix_port_init_exposure(void *dev, int32_t *def, int32_t *max)
 
 int mpix_port_set_exposure(void *dev, int32_t val)
 {
-	/* Not supported, do nothing */
+	HX_CIS_SensorSetting_t  IMX219_exposure_setting[] = {
+			{HX_CIS_I2C_Action_W, 0x015a, ((val>>8)&0xFF)},
+			{HX_CIS_I2C_Action_W, 0x015b, (val&0xFF)},
+	};
+
+	if(hx_drv_cis_setRegTable(IMX219_exposure_setting, HX_CIS_SIZE_N(IMX219_exposure_setting, HX_CIS_SensorSetting_t))!= HX_CIS_NO_ERROR)
+    {
+        mpix_port_printf("IMX219 setting exposure fail.\n");
+		return -1;
+    }
 
 	return 0;
 }

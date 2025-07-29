@@ -25,6 +25,7 @@ override MPU := n
 override TRUSTZONE := y
 override TRUSTZONE_TYPE := security
 override TRUSTZONE_FW_TYPE := 1
+override CIS_SEL := HM_COMMON
 override EPII_USECASE_SEL := drv_user_defined
 
 ifeq ($(strip $(TOOLCHAIN)), arm)

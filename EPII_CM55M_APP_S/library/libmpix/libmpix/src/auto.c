@@ -35,9 +35,10 @@ int mpix_auto_exposure_init(struct mpix_auto_ctrls *ctrls, void *dev)
 
 void mpix_auto_exposure_control(struct mpix_auto_ctrls *ctrls, struct mpix_stats *stats)
 {
-	uint8_t mean = mpix_stats_get_y_mean(stats);
+	uint8_t mean = mpix_stats_get_y_mean(stats)*2;
 	int32_t val = ctrls->exposure_level;
 
+	MPIX_DBG("mean value: %d", mean);
 	if (mean > 128 + CONFIG_MPIX_AEC_THRESHOLD) {
 		MPIX_INF("Over-exposed at exposure %u, reducing exposure", ctrls->exposure_level);
 		val = val * (100 - CONFIG_MPIX_AEC_CHANGE_RATE) / 100 - 1;
@@ -48,8 +49,7 @@ void mpix_auto_exposure_control(struct mpix_auto_ctrls *ctrls, struct mpix_stats
 
 	/* Update the value itself */
 	ctrls->exposure_level = CLAMP(val, 1, ctrls->exposure_max);
-
-	MPIX_DBG("New exposure value: %u/%u", ctrls->exposure_level, ctrls->exposure.max);
+	MPIX_DBG("New exposure value: %d/%d", ctrls->exposure_level, ctrls->exposure_max);
 
 	if (ctrls->dev != NULL) {
 		mpix_port_set_exposure(ctrls->dev, ctrls->exposure_level);
