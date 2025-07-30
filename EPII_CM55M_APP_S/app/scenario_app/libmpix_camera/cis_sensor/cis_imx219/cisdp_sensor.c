@@ -45,7 +45,7 @@
 #endif
 
 #define JPEG_BUFSIZE  (((623+ (IMX219_HW5x5_CROP_WIDTH/16)*(IMX219_HW5x5_CROP_HEIGHT/16)* 38 + 35) >>2 ) <<2)	//YUV420 x10 Compress = ((623+ (W/16)*(H/16)* 38 + 35) >>2 ) <<2  byte
-__attribute__(( section(".bss.NoInit"))) uint8_t jpegbuf[JPEG_BUFSIZE] __ALIGNED(32);
+__attribute__(( section(".bss.NoInit"))) uint8_t jpegbuf[1] __ALIGNED(32);
 
 #define RAW_BUFSIZE  (IMX219_HW5x5_CROP_WIDTH*IMX219_HW5x5_CROP_HEIGHT)   //YUV420: Y= W*H byte, U = ((W*H)>>2) byte, V = ((W*H)>>2) byte
 __attribute__(( section(".bss.NoInit"))) uint8_t demosbuf[RAW_BUFSIZE] __ALIGNED(32);

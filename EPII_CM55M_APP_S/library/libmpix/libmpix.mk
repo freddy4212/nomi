@@ -3,7 +3,7 @@ LIB_LIBMPIX_DIR = $(LIBRARIES_ROOT)/libmpix
 
 LIB_LIBMPIX_ASMSRCDIR	= $(LIB_LIBMPIX_DIR) 
 LIB_LIBMPIX_CSRCDIR	= $(LIB_LIBMPIX_DIR)/libmpix/src/
-LIB_LIBMPIX_CSRCDIR	+= $(LIB_LIBMPIX_DIR)/libmpix/ports/posix/
+LIB_LIBMPIX_CSRCDIR	+= $(LIB_LIBMPIX_DIR)/libmpix/ports/grove_vision_ai2/
 LIB_LIBMPIX_INCDIR	= $(LIB_LIBMPIX_DIR)/libmpix/include/
 LIB_LIBMPIX_INCDIR	+= $(LIB_LIBMPIX_DIR)/libmpix/include/mpix/
 

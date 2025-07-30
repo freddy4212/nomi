@@ -55,6 +55,7 @@
 #include "spi_fatfs.h"
 #include "BITOPS.h"
 #include "hx_drv_CIS_common.h"
+#include "ff.h"
 
 #include "cisdp_sensor.h"
 #include "event_handler.h"
@@ -300,7 +301,7 @@ void app_dump_single_jpeginfo(uint32_t *jpeg_enc_filesize, uint32_t *jpeg_enc_ad
     dbg_printf(DBG_MORE_INFO, "current frame_no=%d, jpeg_size=0x%x,addr=0x%x\n",frame_no,*jpeg_enc_filesize,*jpeg_enc_addr);
 }
 
-__attribute__(( section(".bss.NoInit"))) uint8_t buf_out[54+(640*480*3)] __ALIGNED(32);
+__attribute__(( section(".bss.NoInit"))) uint8_t buf_out[(640*480*3)] __ALIGNED(32);
 
 #pragma pack(push, 1)
 typedef struct {
@@ -326,6 +327,7 @@ typedef struct {
 } BMPInfoHeader;
 #pragma pack(pop)
 
+uint8_t bmp_header[54] = {0};
 void save_rgb_to_bmp(uint8_t* bmp_data, int width, int height, const char* filename) {
 
     const int row_size = width * 3;                
@@ -349,10 +351,18 @@ void save_rgb_to_bmp(uint8_t* bmp_data, int width, int height, const char* filen
         .biSizeImage = pixel_data_size 
     };
     
-    memcpy(bmp_data, &file_header, sizeof(file_header));
-    memcpy(bmp_data + sizeof(BMPFileHeader), &info_header, sizeof(info_header));
+    memcpy(bmp_header, &file_header, sizeof(file_header));
+    memcpy(bmp_header + sizeof(BMPFileHeader), &info_header, sizeof(info_header));
     
-    fastfs_write_image(bmp_data, file_header.bfSize, filename);
+    fastfs_write_image(bmp_header, sizeof(BMPFileHeader)+sizeof(info_header), filename, FA_CREATE_NEW | FA_WRITE, 0);
+	fastfs_write_image(buf_out, pixel_data_size, filename, FA_OPEN_EXISTING | FA_WRITE, sizeof(BMPFileHeader)+sizeof(info_header));
+}
+
+void print_time(char* str, uint32_t start, uint32_t end)
+{
+	uint32_t time_usec;
+	time_usec = end - start;
+    mpix_port_printf("[ %s ]:\n\ttime: %ld us\n", str, time_usec);
 }
 
 int libmpix_process(uint8_t *buf_in, int width, int height, uint8_t channels, uint8_t *buf_out, uint32_t fourcc)
@@ -361,11 +371,13 @@ int libmpix_process(uint8_t *buf_in, int width, int height, uint8_t channels, ui
     struct mpix_stats stats;
 	uint64_t tick_us;
 
+	uint32_t start_time, stop_time;
+
     static struct mpix_auto_ctrls auto_ctrls = {.dev = &imx219, .exposure_level = SENSOR_EXPOSURE_SETTING, .exposure_max = 0xCFFF};
 
     mpix_image_from_buf(&img, buf_in, (width*height*channels), width, height, fourcc);
 
-    stats.nvals = 1000;
+	stats.nvals = 1000;
     mpix_image_stats(&img, &stats);
 
 	// mpix_auto_exposure_init(&auto_ctrls, NULL);
@@ -394,20 +406,22 @@ int libmpix_process(uint8_t *buf_in, int width, int height, uint8_t channels, ui
 	union mpix_correction_any wb = {.white_balance = {.red_level = red_level, .blue_level = blue_level}};
 	// union mpix_correction_any gc = {.gamma = {.level = gamma}};
 
-	mpix_image_correction(&img, MPIX_CORRECTION_BLACK_LEVEL, &bl);
-	mpix_image_correction(&img, MPIX_CORRECTION_WHITE_BALANCE, &wb);
-    // mpix_image_correction(&img, MPIX_CORRECTION_GAMMA, &gc);
+	// mpix_image_correction(&img, MPIX_CORRECTION_BLACK_LEVEL, &bl);
+	// mpix_image_correction(&img, MPIX_CORRECTION_WHITE_BALANCE, &wb);
+    // // mpix_image_correction(&img, MPIX_CORRECTION_GAMMA, &gc);
 
-    mpix_image_kernel(&img, MPIX_KERNEL_GAUSSIAN_BLUR, 3); 
-    mpix_image_kernel(&img, MPIX_KERNEL_SHARPEN, 3);
-    
-    mpix_image_convert(&img, MPIX_FMT_RGB24);
-	mpix_image_to_buf(&img, buf_out, width*height*3);
+    // mpix_image_kernel(&img, MPIX_KERNEL_DENOISE, 3); 
+	// mpix_image_kernel(&img, MPIX_KERNEL_SHARPEN, 3); 
+
+	mpix_image_to_buf(&img, buf_out, (width*height*3));
+
+	mpix_image_free(&img);
 
 	if (img.err != 0) {
 		printf("Oops an error occured: %s!\n", strerror(-img.err));
 		return -1;
 	}
+	return img.size;
 
 }
 
@@ -417,8 +431,9 @@ void run_libmpix_camera(void)
 	uint32_t jpeg_enc_addr;
 	uint32_t read_status;
 	uint32_t w, h;
-	uint32_t raw_size;
+	uint32_t raw_size, size;
 	char filename[20];
+	uint32_t start_time, stop_time;
 
 	if (cisdp_sensor_init() < 0)
 	{
@@ -451,12 +466,16 @@ void run_libmpix_camera(void)
 			copy_mem_to_mem(cisdp_get_raw_addr(), cisdp_get_quater_raw_addr(), w, h, 0, 0, w, h);
 
 			xsprintf(filename, "image%04d.raw", g_cur_frame);
-			fastfs_write_image((uint8_t*)cisdp_get_quater_raw_addr(), raw_size, filename);
+			fastfs_write_image((uint8_t*)cisdp_get_quater_raw_addr(), raw_size, filename, FA_CREATE_NEW | FA_WRITE, 0);
 
-			libmpix_process((uint8_t*)cisdp_get_quater_raw_addr(), w, h, 1, &buf_out[54], MPIX_FMT_SRGGB8);
+			start_time = mpix_port_get_uptime_us();
+			size = libmpix_process((uint8_t*)cisdp_get_quater_raw_addr(), w, h, 1, buf_out, MPIX_FMT_SRGGB8);
+			stop_time = mpix_port_get_uptime_us();
+			print_time("libmpix_process", start_time, stop_time);
 
 			memset(filename, 0, 20);
 			xsprintf(filename, "image%04d.bmp", g_cur_frame);
+			printf("size: %d\n", size);
 			save_rgb_to_bmp(buf_out, w, h, filename);
 			
 		#ifdef ov5674_sensor

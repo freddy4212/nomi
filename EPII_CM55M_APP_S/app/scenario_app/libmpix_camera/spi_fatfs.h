@@ -5,4 +5,4 @@
 
 
 int fatfs_init(void);
-int fastfs_write_image(uint32_t SRAM_addr, uint32_t img_size, uint8_t *filename);
+int fastfs_write_image(uint32_t SRAM_addr, uint32_t img_size, uint8_t *filename, uint8_t mode, uint32_t ofs);

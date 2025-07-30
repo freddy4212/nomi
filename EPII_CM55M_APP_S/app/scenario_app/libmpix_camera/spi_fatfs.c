@@ -122,17 +122,18 @@ int fatfs_init(void)
 }
 
 
-int fastfs_write_image(uint32_t SRAM_addr, uint32_t img_size, uint8_t *filename)
+int fastfs_write_image(uint32_t SRAM_addr, uint32_t img_size, uint8_t *filename, uint8_t mode, uint32_t ofs)
 {
     FIL fil_w;          /* File object */
     FRESULT res;        /* API result code */
     UINT bw;            /* Bytes written */
 
-    res = f_open(&fil_w, filename, FA_CREATE_NEW | FA_WRITE);
+    res = f_open(&fil_w, filename, mode);
     if (res == FR_OK)
     {
         SCB_InvalidateDCache_by_Addr ((void *)SRAM_addr, img_size);
-        printf("write file : %s.\r\n", filename);
+        f_lseek(&fil_w, ofs);
+        printf("write file : %s. [ofs: %d]\r\n", filename, ofs);
         res = f_write(&fil_w, (void *)SRAM_addr, img_size, &bw);
         if (res) { printf("f_write res = %d\r\n", res); }
         f_close(&fil_w);
