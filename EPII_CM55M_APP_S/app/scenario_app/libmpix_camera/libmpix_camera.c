@@ -369,19 +369,19 @@ int libmpix_process(uint8_t *buf_in, int width, int height, uint8_t channels, ui
 {
     struct mpix_image img;
     struct mpix_stats stats;
-	uint64_t tick_us;
+    uint64_t tick_us;
 
-	uint32_t start_time, stop_time;
+    uint32_t start_time, stop_time;
 
     static struct mpix_auto_ctrls auto_ctrls = {.dev = &imx219, .exposure_level = SENSOR_EXPOSURE_SETTING, .exposure_max = 0xCFFF};
 
     mpix_image_from_buf(&img, buf_in, (width*height*channels), width, height, fourcc);
 
-	stats.nvals = 1000;
+    stats.nvals = 1000;
     mpix_image_stats(&img, &stats);
 
-	// mpix_auto_exposure_init(&auto_ctrls, NULL);
-	mpix_auto_exposure_control(&auto_ctrls, &stats);
+    // mpix_auto_exposure_init(&auto_ctrls, NULL);
+    mpix_auto_exposure_control(&auto_ctrls, &stats);
 
     mpix_auto_black_level(&auto_ctrls, &stats);
     mpix_auto_white_balance(&auto_ctrls, &stats);
@@ -393,7 +393,7 @@ int libmpix_process(uint8_t *buf_in, int width, int height, uint8_t channels, ui
 
     switch (fourcc)
     {
-	case MPIX_FMT_SRGGB8:
+    case MPIX_FMT_SRGGB8:
     case MPIX_FMT_SBGGR8:
         mpix_image_debayer(&img, 2);
         break;
@@ -403,25 +403,25 @@ int libmpix_process(uint8_t *buf_in, int width, int height, uint8_t channels, ui
     }
 
     union mpix_correction_any bl = {.black_level = {.level = black_level}};
-	union mpix_correction_any wb = {.white_balance = {.red_level = red_level, .blue_level = blue_level}};
-	// union mpix_correction_any gc = {.gamma = {.level = gamma}};
+    union mpix_correction_any wb = {.white_balance = {.red_level = red_level, .blue_level = blue_level}};
+    // union mpix_correction_any gc = {.gamma = {.level = gamma}};
 
-	// mpix_image_correction(&img, MPIX_CORRECTION_BLACK_LEVEL, &bl);
-	// mpix_image_correction(&img, MPIX_CORRECTION_WHITE_BALANCE, &wb);
-    // // mpix_image_correction(&img, MPIX_CORRECTION_GAMMA, &gc);
+    mpix_image_correction(&img, MPIX_CORRECTION_BLACK_LEVEL, &bl);
+    mpix_image_correction(&img, MPIX_CORRECTION_WHITE_BALANCE, &wb);
+    // mpix_image_correction(&img, MPIX_CORRECTION_GAMMA, &gc);
 
-    // mpix_image_kernel(&img, MPIX_KERNEL_DENOISE, 3); 
-	// mpix_image_kernel(&img, MPIX_KERNEL_SHARPEN, 3); 
+    mpix_image_kernel(&img, MPIX_KERNEL_DENOISE, 3); 
+    mpix_image_kernel(&img, MPIX_KERNEL_SHARPEN, 3); 
 
-	mpix_image_to_buf(&img, buf_out, (width*height*3));
+    mpix_image_to_buf(&img, buf_out, (width*height*3));
 
-	mpix_image_free(&img);
+    mpix_image_free(&img);
 
-	if (img.err != 0) {
-		printf("Oops an error occured: %s!\n", strerror(-img.err));
-		return -1;
-	}
-	return img.size;
+    if (img.err != 0) {
+        printf("Oops an error occured: %s!\n", strerror(-img.err));
+        return -1;
+    }
+    return img.size;
 
 }
 
