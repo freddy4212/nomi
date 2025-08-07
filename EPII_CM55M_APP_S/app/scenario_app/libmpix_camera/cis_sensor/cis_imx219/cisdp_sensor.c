@@ -47,9 +47,9 @@
 #define JPEG_BUFSIZE  (((623+ (IMX219_HW5x5_CROP_WIDTH/16)*(IMX219_HW5x5_CROP_HEIGHT/16)* 38 + 35) >>2 ) <<2)	//YUV420 x10 Compress = ((623+ (W/16)*(H/16)* 38 + 35) >>2 ) <<2  byte
 __attribute__(( section(".bss.NoInit"))) uint8_t jpegbuf[1] __ALIGNED(32);
 
-#define RAW_BUFSIZE  (IMX219_HW5x5_CROP_WIDTH*IMX219_HW5x5_CROP_HEIGHT)   //YUV420: Y= W*H byte, U = ((W*H)>>2) byte, V = ((W*H)>>2) byte
+#define RAW_BUFSIZE  (IMX219_INP_OUT_WIDTH*IMX219_INP_OUT_HEIGHT)   //YUV420: Y= W*H byte, U = ((W*H)>>2) byte, V = ((W*H)>>2) byte
 __attribute__(( section(".bss.NoInit"))) uint8_t demosbuf[RAW_BUFSIZE] __ALIGNED(32);
-__attribute__(( section(".bss.NoIni2"))) uint8_t demosbuf_copy[RAW_BUFSIZE] __ALIGNED(32);
+__attribute__(( section(".bss.NoIni2"))) uint8_t demosbuf_copy[1] __ALIGNED(32);
 
 #define JPEG_HEADER_BUFSIZE 100
 __attribute__(( section(".bss.NoInit"))) uint8_t jpegfilesizebuf[JPEG_HEADER_BUFSIZE] __ALIGNED(32);
@@ -61,6 +61,7 @@ static volatile uint32_t g_jpegautofill_addr = (uint32_t)jpegfilesizebuf;
 
 static HX_CIS_SensorSetting_t IMX219_init_setting[] = {
 #include "IMX219_mipi_2lane_3280x2464.i"
+// #include "IMX219_mipi_2lane_1640x1232.i"
 };
 
 static HX_CIS_SensorSetting_t IMX219_stream_on[] = {
@@ -99,8 +100,8 @@ static void cisdp_wdma_addr_init(void)
     sensordplib_set_xDMA_baseaddrbyapp(g_wdma1_baseaddr, g_wdma2_baseaddr, g_wdma3_baseaddr);
     sensordplib_set_jpegfilesize_addrbyapp(g_jpegautofill_addr);
 
-	xprintf("WD1[%x], WD2_J[%x], WD3_RAW[%x], JPAuto[%x]\n",g_wdma1_baseaddr, g_wdma2_baseaddr,
-			g_wdma3_baseaddr, g_jpegautofill_addr);
+	// xprintf("WD1[%x], WD2_J[%x], WD3_RAW[%x], JPAuto[%x]\n",g_wdma1_baseaddr, g_wdma2_baseaddr,
+	// 		g_wdma3_baseaddr, g_jpegautofill_addr);
 }
 
 
@@ -130,8 +131,8 @@ void imx219_set_pll200()
 	hx_drv_scu_get_freq(SCU_CLK_FREQ_TYPE_HSC_MIPI_RXCLK, &mipi_pixel_clk);
 	mipi_pixel_clk = mipi_pixel_clk / 1000000;
 
-    dbg_printf(DBG_LESS_INFO, "MIPI CLK change to PLL freq:(%d / %d)\n", pllfreq, (cfg.mipiclk.hscmipiclkdiv+1));
-	dbg_printf(DBG_LESS_INFO, "MIPI TX CLK: %dM\n", mipi_pixel_clk);
+    // dbg_printf(DBG_LESS_INFO, "MIPI CLK change to PLL freq:(%d / %d)\n", pllfreq, (cfg.mipiclk.hscmipiclkdiv+1));
+	// dbg_printf(DBG_LESS_INFO, "MIPI TX CLK: %dM\n", mipi_pixel_clk);
 }
 
 
@@ -320,7 +321,7 @@ int cisdp_sensor_init()
 		dbg_printf(DBG_LESS_INFO, "IMX219 Init Stream by app \n");
 	}
 
-    //imx219_set_binning
+    // imx219_set_binning
     if(hx_drv_cis_setRegTable(IMX219_binning_setting, HX_CIS_SIZE_N(IMX219_binning_setting, HX_CIS_SensorSetting_t))!= HX_CIS_NO_ERROR)
     {
         dbg_printf(DBG_LESS_INFO, "IMX219 Init by app fail (IMX219_binning_setting)\n");
@@ -439,23 +440,23 @@ int cisdp_dp_init(bool inp_init, CISDP_INIT_TYPE_E type, SENSORDPLIB_PATH_E dp_t
 	set_mipi_csirx_enable();
 
     INP_CROP_T crop;
-    crop.start_x = DP_INP_CROP_START_X;
-    crop.start_y = DP_INP_CROP_START_Y;
+    crop.start_x = (SENCTRL_SENSOR_WIDTH-DP_INP_CROP_WIDTH)/2;
+    crop.start_y = (SENCTRL_SENSOR_HEIGHT-DP_INP_CROP_HEIGHT)/2;
 
     if(DP_INP_CROP_WIDTH >= 1)
-    	crop.last_x = DP_INP_CROP_WIDTH - 1;
+    	crop.last_x = crop.start_x + DP_INP_CROP_WIDTH - 1;
     else
     	crop.last_x = 0;
 
     if(DP_INP_CROP_HEIGHT >= 1)
-    	crop.last_y = DP_INP_CROP_HEIGHT - 1;
+    	crop.last_y = crop.start_y + DP_INP_CROP_HEIGHT - 1;
     else
     	crop.last_y = 0;
 
     // sensordplib_set_sensorctrl_inp_wi_crop(SENCTRL_SENSOR_TYPE, SENCTRL_STREAM_TYPE,
 	// 		SENCTRL_SENSOR_WIDTH, SENCTRL_SENSOR_HEIGHT, INP_SUBSAMPLE_DISABLE, crop);
 	sensordplib_set_sensorctrl_inp_wi_crop_bin(SENCTRL_SENSOR_TYPE, SENCTRL_STREAM_TYPE,
-            SENCTRL_SENSOR_WIDTH, SENCTRL_SENSOR_HEIGHT, DP_INP_SUBSAMPLE, crop, DP_INP_BINNING);
+            SENCTRL_SENSOR_WIDTH, SENCTRL_SENSOR_HEIGHT, DP_INP_SUBSAMPLE, crop, INP_BINNING_8TO2_B);
 
 	uint8_t cyclic_buffer_cnt = 1;
 
@@ -719,12 +720,12 @@ uint32_t copy_mem_to_mem(uint32_t src_addr, uint32_t dst_addr, uint32_t src_w, u
 
 uint32_t cisdp_get_raw_width()
 {
-	return IMX219_HW5x5_CROP_WIDTH;
+	return IMX219_INP_OUT_WIDTH;
 }
 
 uint32_t cisdp_get_raw_height()
 {
-	return IMX219_HW5x5_CROP_HEIGHT;
+	return IMX219_INP_OUT_HEIGHT;
 }
 
 uint32_t cisdp_get_raw_addr()

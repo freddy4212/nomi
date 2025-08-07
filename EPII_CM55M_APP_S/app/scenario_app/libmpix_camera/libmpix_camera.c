@@ -7,7 +7,16 @@
 #include "powermode_export.h"
 
 #define WE2_CHIP_VERSION_C		0x8538000c
-#define SEND_IMAGE_SPI			0
+#define SEND_IMAGE_UART			1
+
+// #define ov5674_sensor
+#ifdef ov5674_sensor
+#define SENSOR_EXPOSURE_SETTING 1000
+#else
+#define SENSOR_EXPOSURE_SETTING IMX219_EXPOSURE_SETTING
+#endif
+
+
 #ifdef TRUSTZONE_SEC
 #ifdef FREERTOS
 /* Trustzone config. */
@@ -65,13 +74,6 @@
 #include <mpix/image.h>
 #include <mpix/auto.h>
 
-// #define ov5674_sensor
-#ifdef ov5674_sensor
-#define SENSOR_EXPOSURE_SETTING 1000
-#else
-#define SENSOR_EXPOSURE_SETTING IMX219_EXPOSURE_SETTING
-#endif
-
 typedef struct IMX219_Dev
 {
 	int sensor;
@@ -114,8 +116,8 @@ void dp_var_init()
 static void app_dplib_cb(SENSORDPLIB_STATUS_E event)
 {
 	uint32_t de0_count, conv_count;
-	printf("event = %d\n", event);
-	dbg_printf(DBG_MORE_INFO, "event = %d\n", event);
+	// printf("event = %d\n", event);
+	// dbg_printf(DBG_MORE_INFO, "event = %d\n", event);
 
 	if(event != SENSORDPLIB_STATUS_TIMER_FIRE_APP_NOTREADY)
 	{
@@ -358,6 +360,25 @@ void save_rgb_to_bmp(uint8_t* bmp_data, int width, int height, const char* filen
 	fastfs_write_image(buf_out, pixel_data_size, filename, FA_OPEN_EXISTING | FA_WRITE, sizeof(BMPFileHeader)+sizeof(info_header));
 }
 
+void send_camera_data(uint8_t* data, int w, int h)
+{
+    int raw_size = w*h;
+    char filename[20];
+
+#if SEND_IMAGE_UART
+    send_raw_data(data, raw_size);
+    
+#else
+    memset(filename, 0, 20);
+    xsprintf(filename, "image%04d.raw", g_cur_frame);
+	fastfs_write_image((uint8_t*)data, raw_size, filename, FA_CREATE_NEW | FA_WRITE, 0);
+
+    memset(filename, 0, 20);    
+    xsprintf(filename, "image%04d.bmp", g_cur_frame);
+    save_rgb_to_bmp(data, w, h, filename);
+#endif
+}
+
 void print_time(char* str, uint32_t start, uint32_t end)
 {
 	uint32_t time_usec;
@@ -382,6 +403,10 @@ int libmpix_process(uint8_t *buf_in, int width, int height, uint8_t channels, ui
 
     // mpix_auto_exposure_init(&auto_ctrls, NULL);
     mpix_auto_exposure_control(&auto_ctrls, &stats);
+
+    mpix_image_to_buf(&img, buf_out, (width*height));
+    mpix_image_free(&img);
+    return 0;
 
     mpix_auto_black_level(&auto_ctrls, &stats);
     mpix_auto_white_balance(&auto_ctrls, &stats);
@@ -430,9 +455,8 @@ void run_libmpix_camera(void)
 	uint32_t jpeg_enc_filesize;
 	uint32_t jpeg_enc_addr;
 	uint32_t read_status;
-	uint32_t w, h;
+	uint32_t w, h, i, j;
 	uint32_t raw_size, size;
-	char filename[20];
 	uint32_t start_time, stop_time;
 
 	if (cisdp_sensor_init() < 0)
@@ -463,21 +487,20 @@ void run_libmpix_camera(void)
 			raw_size = w*h;
 			
 			printf("w: %d, h: %d, raw_size: %d\n", w, h, raw_size);
+
+        #if SEND_IMAGE_UART
+            // copy_mem_to_mem(cisdp_get_raw_addr(), buf_out, w, h, 0, 0, w, h);
+			// libmpix_process((uint8_t*)buf_out, w, h, 1, buf_out, MPIX_FMT_SRGGB8);
+            send_camera_data((uint8_t*)cisdp_get_raw_addr(), w, h);
+        #else
 			copy_mem_to_mem(cisdp_get_raw_addr(), cisdp_get_quater_raw_addr(), w, h, 0, 0, w, h);
-
-			xsprintf(filename, "image%04d.raw", g_cur_frame);
-			fastfs_write_image((uint8_t*)cisdp_get_quater_raw_addr(), raw_size, filename, FA_CREATE_NEW | FA_WRITE, 0);
-
 			start_time = mpix_port_get_uptime_us();
 			size = libmpix_process((uint8_t*)cisdp_get_quater_raw_addr(), w, h, 1, buf_out, MPIX_FMT_SRGGB8);
 			stop_time = mpix_port_get_uptime_us();
 			print_time("libmpix_process", start_time, stop_time);
+            send_camera_data(buf_out, w, h);
+        #endif
 
-			memset(filename, 0, 20);
-			xsprintf(filename, "image%04d.bmp", g_cur_frame);
-			printf("size: %d\n", size);
-			save_rgb_to_bmp(buf_out, w, h, filename);
-			
 		#ifdef ov5674_sensor
 			if (cisdp_dp_init(true, CISDP_INIT_TYPE_INP_CROP_1280x960_RAW, SENSORDPLIB_PATH_INP_WDMA2, app_dplib_cb, 4) < 0)
 		#else 
@@ -504,17 +527,8 @@ int app_main(void) {
 	printf("================== libmpix_camera test ==================\n");
 	printf("=========================================================\n");
 	
-#if SEND_IMAGE_SPI
-	hx_drv_scu_set_PB2_pinmux(SCU_PB2_PINMUX_SPI_M_DO_1, 1);
-	hx_drv_scu_set_PB3_pinmux(SCU_PB3_PINMUX_SPI_M_DI_1, 1);
-	hx_drv_scu_set_PB4_pinmux(SCU_PB4_PINMUX_SPI_M_SCLK_1, 1);
-	hx_drv_scu_set_PB11_pinmux(SCU_PB11_PINMUX_SPI_M_CS, 1);
-	if (hx_drv_spi_mst_open_speed(SPI_SEN_PIC_CLK) != 0)
-	{
-		dbg_printf(DBG_MORE_INFO, "DEBUG SPI master init fail\r\n");
-		sensordplib_retrigger_capture();
-		return ;
-	}
+#if SEND_IMAGE_UART
+	
 #else
 	fatfs_init();
 #endif

@@ -42,6 +42,9 @@
 		{HX_CIS_I2C_Action_W, 0x0170, 0x01},	/* X_ODD_INC_A */
 		{HX_CIS_I2C_Action_W, 0x0171, 0x01},	/* Y_ODD_INC_A */
 
+        {HX_CIS_I2C_Action_W, 0x0174, 0x01},	
+		{HX_CIS_I2C_Action_W, 0x0175, 0x01},	
+
 		/* Output setup registers */
 		{HX_CIS_I2C_Action_W, 0x0114, 0x01},	/* CSI 2-Lane Mode */
 		{HX_CIS_I2C_Action_W, 0x0128, 0x00},	/* DPHY Auto Mode */
@@ -63,15 +66,15 @@
 		{HX_CIS_I2C_Action_W, 0x0168, 0x00},
 		{HX_CIS_I2C_Action_W, 0x0169, 0x00},
 		{HX_CIS_I2C_Action_W, 0x016a, 0x09},
-		{HX_CIS_I2C_Action_W, 0x016b, 0x9f},
-		{HX_CIS_I2C_Action_W, 0x016c, 0x0c},
-		{HX_CIS_I2C_Action_W, 0x016d, 0xd0},
-		{HX_CIS_I2C_Action_W, 0x016e, 0x09},
-		{HX_CIS_I2C_Action_W, 0x016f, 0xa0},
-		{HX_CIS_I2C_Action_W, 0x0624, 0x0c},
-		{HX_CIS_I2C_Action_W, 0x0625, 0xd0},
-		{HX_CIS_I2C_Action_W, 0x0626, 0x09},
-		{HX_CIS_I2C_Action_W, 0x0627, 0xa0},
+        {HX_CIS_I2C_Action_W, 0x016b, 0x9f},
+        {HX_CIS_I2C_Action_W, 0x016c, 0x06},  // X输出尺寸高8位=0x0668=1640（原值0x0c）
+        {HX_CIS_I2C_Action_W, 0x016d, 0x68},  // X输出尺寸低8位（原值0xd0）
+        {HX_CIS_I2C_Action_W, 0x016e, 0x04},  // Y输出尺寸高8位=0x04D0=1232（原值0x09）
+        {HX_CIS_I2C_Action_W, 0x016f, 0xd0},  // Y输出尺寸低8位（原值0xa0）
+        {HX_CIS_I2C_Action_W, 0x0624, 0x06},  // X分档尺寸高8位=0x0668（原值0x0c）
+        {HX_CIS_I2C_Action_W, 0x0625, 0x68},  // X分档尺寸低8位（原值0xd0）
+        {HX_CIS_I2C_Action_W, 0x0626, 0x04},  // Y分档尺寸高8位=0x04D0（原值0x09）
+        {HX_CIS_I2C_Action_W, 0x0627, 0xd0},  // Y分档尺寸低8位（原值0xa0）
 
 		/**
 		 * imx219_set_framefmt: raw10_framefmt_regs
@@ -80,4 +83,7 @@
 		{HX_CIS_I2C_Action_W, 0x018d, 0x0a},
 		{HX_CIS_I2C_Action_W, 0x0309, 0x0a},
 
-                // {HX_CIS_I2C_Action_W, 0x3E00, 0x02},
+      
+
+
+            
