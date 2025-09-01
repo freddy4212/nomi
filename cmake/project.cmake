@@ -9,8 +9,6 @@ if(NOT DEFINED BOARD_NAME)
 endif()
 
 
-message(STATUS "Building for board: ${BOARD_NAME}")
-
 if(NOT "${WE2_SDK_PATH}" STREQUAL "")
     message(STATUS "WE2_SDK_PATH: ${WE2_SDK_PATH}")
 
@@ -147,6 +145,19 @@ if(NOT "${WE2_SDK_PATH}" STREQUAL "")
         SPI_EEPROM_USE_WB_25Q128JW_INST_
     )
 
+    # device
+    component_register(
+        COMPONENT_NAME device
+        INCLUDE_DIRS ${WE2_SDK_PATH}/device/inc  ${WE2_SDK_PATH}/device/clib  ${WE2_SDK_PATH}/device/clib/gnu
+        SRCS ${WE2_SDK_PATH}/device/startup_WE2_ARMCM55.cc
+            ${WE2_SDK_PATH}/device/system_WE2_ARMCM55.c
+            ${WE2_SDK_PATH}/device/WE2_core.c
+            ${WE2_SDK_PATH}/device/clib/console_io.c
+            ${WE2_SDK_PATH}/device/clib/gnu/retarget_io.c
+            ${WE2_SDK_PATH}/device/clib/retarget.c
+            REQUIRED
+    ) 
+
     # board
     component_register(
         COMPONENT_NAME board
@@ -154,20 +165,6 @@ if(NOT "${WE2_SDK_PATH}" STREQUAL "")
         SRCS ${WE2_SDK_PATH}/board/epii_evb/board.c
              ${WE2_SDK_PATH}/board/epii_evb/pinmux_init.c
              ${WE2_SDK_PATH}/board/epii_evb/platform_driver_init.c
-        REQUIRED
-    ) 
-
-    # device
-    component_register(
-        COMPONENT_NAME device
-        INCLUDE_DIRS ${WE2_SDK_PATH}/device/inc  ${WE2_SDK_PATH}/device/clib  ${WE2_SDK_PATH}/device/clib/gnu
-        SRCS ${WE2_SDK_PATH}/device/startup_WE2_ARMCM55.cc
-             ${WE2_SDK_PATH}/device/system_WE2_ARMCM55.c
-             ${WE2_SDK_PATH}/device/WE2_core.c
-             ${WE2_SDK_PATH}/device/clib/console_io.c
-             ${WE2_SDK_PATH}/device/clib/gnu/retarget_io.c
-             ${WE2_SDK_PATH}/device/clib/retarget.c
-             ${WE2_SDK_PATH}/device/clib/retarget.c
         REQUIRED
     ) 
 
@@ -183,8 +180,6 @@ if(NOT "${WE2_SDK_PATH}" STREQUAL "")
         COMPONENT_NAME CMSIS
         INCLUDE_DIRS ${WE2_SDK_PATH}/CMSIS
     )
-
-    # libraries
 
     # trustzone configuration for secure build
     component_register(
@@ -210,9 +205,6 @@ if(NOT "${WE2_SDK_PATH}" STREQUAL "")
         REQUIRED 
     )
 
-    # freertos
-    com
-
 else()
     message(WARNING "WE2_SDK_PATH is not set")
 endif()
@@ -224,7 +216,8 @@ set(SKIP_COMPONENTS "")
 
 foreach(component IN LISTS COMPONENTS)
     get_filename_component(component_name ${component} NAME)
-    message(STATUS "component: ${component_name}")
+
+    message(STATUS "Found component: ${component_name}")
 
     if(EXISTS "${component}/CMakeLists.txt" AND component_name IN_LIST REQUIREDS)
         include("${component}/CMakeLists.txt")

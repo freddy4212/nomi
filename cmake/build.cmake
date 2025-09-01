@@ -5,7 +5,7 @@ configure_file(
 )
 
 
-include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+include_directories(${PROJECT_NAME}  ${CMAKE_CURRENT_BINARY_DIR})
 
 file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/dummy.c "")
 

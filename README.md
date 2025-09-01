@@ -193,6 +193,50 @@ component_register(
     COMPONENT_NAME my_component
     SRCS src/component.c
     INCLUDE_DIRS include/
+    COMPILE_OPTIONS -O2 -Wall
+    COMPILE_DEFINITIONS MY_FEATURE_ENABLED
+    PRIVATE_COMPILE_OPTIONS -Wextra
+    PRIVATE_COMPILE_DEFINITIONS DEBUG_MODE=1
+    REQUIRED
+)
+```
+
+#### Component Parameters
+- **COMPONENT_NAME**: Name of the component
+- **SRCS**: Source files for the component  
+- **INCLUDE_DIRS**: Public include directories
+- **PRIVATE_INCLUDE_DIRS**: Private include directories
+- **REQUIREDS**: Public dependencies
+- **PRIVATE_REQUIREDS**: Private dependencies
+- **COMPILE_OPTIONS**: Public compile options (inherited by dependents)
+- **PRIVATE_COMPILE_OPTIONS**: Private compile options (component only)
+- **COMPILE_DEFINITIONS**: Public compile definitions (inherited by dependents)
+- **PRIVATE_COMPILE_DEFINITIONS**: Private compile definitions (component only)
+- **LIBRARY_DIRS**: Additional library directories
+- **SHARED**: Create shared library instead of static
+- **REQUIRED**: Mark component as required for linking
+
+#### Example Usage
+
+```cmake
+# High-performance math component with optimizations
+component_register(
+    COMPONENT_NAME fast_math
+    SRCS src/fast_math.c src/simd_ops.c
+    INCLUDE_DIRS include/
+    COMPILE_OPTIONS -O3 -ffast-math -mfpu=neon
+    COMPILE_DEFINITIONS FAST_MATH_ENABLED USE_SIMD
+    REQUIRED
+)
+
+# Debug-enabled sensor component  
+component_register(
+    COMPONENT_NAME sensor_driver
+    SRCS src/sensor.c
+    INCLUDE_DIRS include/
+    PRIVATE_COMPILE_OPTIONS -DDEBUG_SENSOR
+    PRIVATE_COMPILE_DEFINITIONS SENSOR_LOG_LEVEL=3
+    REQUIREDS fast_math
 )
 ```
 
