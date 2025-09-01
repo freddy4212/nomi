@@ -1,7 +1,0 @@
-{
-    "files.associations": {
-        "limits": "cpp",
-        "forward_list": "cpp",
-        "cstdint": "c"
-    }
-}
