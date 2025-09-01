@@ -189,7 +189,7 @@ if(NOT "${WE2_SDK_PATH}" STREQUAL "")
         REQUIRED
     )
 
-    #interface libraries
+    #interface 
     component_register(
         COMPONENT_NAME interface
         INCLUDE_DIRS ${WE2_SDK_PATH}/interface
@@ -197,11 +197,32 @@ if(NOT "${WE2_SDK_PATH}" STREQUAL "")
         REQUIRED 
     )
 
-    # common libraries
+    #external
+    component_register(
+        COMPONENT_NAME external
+        INCLUDE_DIRS ${WE2_SDK_PATH}/external/cis
+        REQUIREDS extdevice
+    )
+
+    #libraries
     component_register(
         COMPONENT_NAME common
         INCLUDE_DIRS ${WE2_SDK_PATH}/library/common
         SRCS ${WE2_SDK_PATH}/library/common/xprintf.c
+        REQUIRED 
+    )
+
+    component_register(
+        COMPONENT_NAME spi_eeprom
+        INCLUDE_DIRS ${WE2_SDK_PATH}/library/spi_eeprom
+        SRCS ${WE2_SDK_PATH}/library/common/xprintf.c
+        REQUIREDS _spi_eeprom
+        REQUIRED 
+    )
+
+    component_register(
+        COMPONENT_NAME sensordp
+        INCLUDE_DIRS ${WE2_SDK_PATH}/library/sensordp/inc ${WE2_SDK_PATH}/library/sensordp/internal_inc
         REQUIRED 
     )
 
@@ -226,8 +247,9 @@ foreach(component IN LISTS COMPONENTS)
     endif()
 
     foreach(component IN LISTS SKIP_COMPONENTS)
+        message(STATUS "Skipping component: ${component_name}")
         get_filename_component(component_name ${component} NAME)
-
+        message(STATUS "REQUIRES: ${REQUIREDS}")
         if(EXISTS "${component}/CMakeLists.txt" AND component_name IN_LIST REQUIREDS)
             include("${component}/CMakeLists.txt")
         endif()

@@ -1,178 +1,226 @@
 MEMORY
 {
-  CM55M_S_APP_ROM (rx) : ORIGIN = 0x10000000, LENGTH = 0x40000
-  CM55M_S_APP_DATA (rwx) : ORIGIN = 0x30000000, LENGTH = 0x40000
-  CM55M_S_SRAM (rwx) : ORIGIN = ((0x34001000 +0x00004000)+0x0001A000), LENGTH = 0x00200000-(((0x34001000 +0x00004000)+0x0001A000)-(0x34000000))
+    CM55M_S_APP_ROM (rx) : ORIGIN = 0x10000000, LENGTH = 0x10040000 - 0x10000000
+    CM55M_S_APP_DATA (rwx) : ORIGIN = 0x30000000, LENGTH = 0x30040000 - 0x30000000
+    CM55M_S_SRAM (rwx) : ORIGIN = 0x34000000, LENGTH = 0x34054000 - 0x34000000
+    CM55M_S_EL_ALLOC (rw) : ORIGIN = 0x34054000, LENGTH = 0x3416A000 - 0x34054000
 }
-__HEAP_SIZE = 0x10000;
-__STACK_SIZE = 0x10000;
+__HEAP_SIZE = 0x4000;
+__STACK_SIZE = 0x2000;
 ENTRY(Reset_Handler)
 SECTIONS
 {
-    .table : ALIGN(4)
+    .table :
     {
-        FILL(0xff)
-        __vectors_start__ = ABSOLUTE(.) ;
+        . = ALIGN(8);
+        __vectors_start__ = ABSOLUTE(.);
         KEEP(*(.vectors))
-        *(.after_vectors*)
-        . = ALIGN(32);
+        . = ALIGN(8);
         __privileged_functions_start__ = .;
         *(privileged_functions)
         *(privileged_functions*)
-        . = ALIGN(32);
-        __privileged_functions_end__ = (. - 1);
-        . = ALIGN(32);
+        __privileged_functions_end__ = .;
+        . = ALIGN(8);
         __syscalls_flash_start__ = .;
         *(freertos_system_calls)
         *(freertos_system_calls*)
-        . = ALIGN(32);
-        __syscalls_flash_end__ = (. - 1);
+        __syscalls_flash_end__ = .;
+        . = ALIGN(8);
         __unprivileged_flash_start__ = .;
     } > CM55M_S_APP_ROM
-    .text_2 : ALIGN(4)
+    .noinit (NOLOAD) :
     {
-        *libdriver.*:*(.text* .rodata*)
-        *cvapp.o (.text* .rodata*)
-    } > CM55M_S_SRAM
-    .text : ALIGN(4)
-    {
-       *(.text*)
-       KEEP(*freertos*/tasks.o(.rodata*))
-       . = ALIGN(4);
-       KEEP(*(.init))
-       KEEP(*(.fini));
-     *crtbegin.o(.ctors)
-     *crtbegin?.o(.ctors)
-     *(EXCLUDE_FILE(*crtend?.o *crtend.o) .ctors)
-     *(SORT(.ctors.*))
-     *(.ctors)
-     *crtbegin.o(.dtors)
-     *crtbegin?.o(.dtors)
-     *(EXCLUDE_FILE(*crtend?.o *crtend.o) .dtors)
-     *(SORT(.dtors.*))
-     *(.dtors)
+        . = ALIGN(8);
+        _noinit = .;
+        PROVIDE(__start_noinit_RAM = .) ;
+        PROVIDE(__start_noinit_SRAM = .) ;
+        *(.noinit .noinit.* .gnu.linkonce.n.*)
         . = ALIGN(4);
+        _end_noinit = .;
+        PROVIDE(__end_noinit_RAM = .) ;
+        PROVIDE(__end_noinit_SRAM = .) ;
+    } > CM55M_S_APP_ROM
+    .text.ext :
+    {
+        . = ALIGN(8);
+        *libdriver.*:*(.text* .rodata*)
+        . = ALIGN(8);
+        *libcommon.*:*(.text* .rodata*)
+        . = ALIGN(8);
+        *lib_cmsis_nn_7_0_0.*:*(.text* .rodata*)
+        . = ALIGN(8);
+        *lib_i2c_comm.*:*(.text* .rodata*)
+        . = ALIGN(8);
+        *lib_img_proc.*:*(.text* .rodata*)
+        . = ALIGN(8);
+        *lib_spi_eeprom.*:*(.text* .rodata*)
+        . = ALIGN(8);
+        *lib_spi_psram.*:*(.text* .rodata*)
+        . = ALIGN(8);
+        *lib_spi_ptl.*:*(.text* .rodata*)
+        . = ALIGN(8);
+        *libaudio.*:*(.text* .rodata*)
+        . = ALIGN(8);
+        *libsscma_micro.*:*(.text* .rodata*)
+    } > CM55M_S_APP_DATA
+    .text :
+    {
+        . = ALIGN(8);
+        *(.text*)
+        . = ALIGN(8);
+        KEEP(*(.init))
+        . = ALIGN(8);
+        PROVIDE_HIDDEN(__preinit_array_start = .);
+        _spreinit_array = .;
+        KEEP(*(.preinit_array))
+        KEEP(*(.preinit_array*))
+        _epreinit_array = .;
+        PROVIDE_HIDDEN(__preinit_array_end = .);
+        . = ALIGN(8);
+        _sinit_array = .;
+        PROVIDE_HIDDEN(__init_array_start = .);
+        KEEP(*(.init_array))
+        KEEP(*(.init_array*))
+        PROVIDE_HIDDEN(__init_array_end = .);
+        _einit_array = .;
+        . = ALIGN(8);
+        KEEP(*crtbegin.o(.ctors))
+        KEEP(*crtbegin?.o(.ctors))
+        KEEP(*(EXCLUDE_FILE (*crtend.o *crtend?.o ) .ctors))
+        KEEP(*(SORT(.ctors.*)))
+        KEEP(*(.ctors))
+        . = ALIGN(8);
+        KEEP(*crtbegin.o(.dtors))
+        KEEP(*crtbegin?.o(.dtors))
+        KEEP(*(EXCLUDE_FILE (*crtend.o *crtend?.o ) .dtors))
+        KEEP(*(SORT(.dtors.*)))
+        KEEP(*(.dtors))
+        . = ALIGN(8);
+        KEEP(*(.fini));
+        . = ALIGN(8);
+        _sfini_array = .;
+        PROVIDE_HIDDEN(__fini_array_start = .);
+        KEEP(*(.fini_array))
+        KEEP(*(.fini_array*))
+        PROVIDE_HIDDEN(__fini_array_end = .);
+        _efini_array = .;
+        . = ALIGN(8);
         KEEP(*(.eh_frame*))
     } > CM55M_S_APP_ROM
-    .model : ALIGN(4)
+    .rodata :
     {
-        *person_detect_model_data_vela.o*(.text* .rodata*)
-    } > CM55M_S_SRAM
-    .noinit (NOLOAD): ALIGN(4)
-    {
-        *(.bss.NoInit*)
-        *(.noinit*)
-    } > CM55M_S_SRAM
-    .rodata : ALIGN(4)
-    {
+        FILL(0x0000)
+        . = ALIGN(4);
         __rodata_start = .;
         *(.rodata .rodata.* .constdata .constdata.*)
         __rodata_end = .;
     } > CM55M_S_APP_DATA
-    .ARM.extab : ALIGN(4)
+    .persistent :
     {
+        FILL(0x0000)
+        . = ALIGN(4);
+        PROVIDE (__persistent_start = .);
+        *(.persistent .persistent.* .gnu.linkonce.p.*)
+        PROVIDE (__persistent_end = .);
+    } > CM55M_S_APP_DATA
+    .elHeap :
+    {
+        . = ALIGN(32);
+        KEEP(*(.bss.*elHeap*))
+    } > CM55M_S_EL_ALLOC
+    .ucHeap :
+    {
+        . = ALIGN(8);
+        *(.bss.ucHeap)
+    } > CM55M_S_SRAM
+    .ARM.extab :
+    {
+        . = ALIGN(4);
         *(.ARM.extab* .gnu.linkonce.armextab.*)
     } > CM55M_S_APP_ROM
-    .ARM.exidx : ALIGN(4)
+    .ARM.exidx :
     {
+        . = ALIGN(4);
         __exidx_start = .;
         *(.ARM.exidx* .gnu.linkonce.armexidx.*)
         __exidx_end = .;
     } > CM55M_S_APP_ROM
-   .copy.table :
-   {
-     . = ALIGN(4);
-     __copy_table_start__ = .;
+    .copy.table :
+    {
+        . = ALIGN(8);
+        __copy_table_start__ = .;
         LONG(LOADADDR(.data));
-        LONG( ADDR(.data));
-        LONG( SIZEOF(.data)/4);
-     __copy_table_end__ = .;
-   } > CM55M_S_APP_ROM
-   .zero.table :
-   {
-     . = ALIGN(4);
-     __zero_table_start__ = .;
-        LONG( ADDR(.bss));
-        LONG( SIZEOF(.bss)/4);
-     __zero_table_end__ = .;
-   } > CM55M_S_APP_ROM
-     . = ALIGN(32);
-    __unprivileged_flash_end__ = (. - 1);
-    .data : ALIGN(4)
+        LONG(ADDR(.data));
+        LONG(SIZEOF(.data) / 4);
+        __copy_table_end__ = .;
+    } > CM55M_S_APP_ROM
+    .zero.table :
     {
-       FILL(0xff)
-    __data_start__ = .;
-       . = ALIGN(32);
-       __privileged_sram_start__ = .;
-       *(privileged_data)
-       *(privileged_data*)
-       . = ALIGN(32);
-       __privileged_sram_end__ = (. - 1);
+        . = ALIGN(8);
+        __zero_table_start__ = .;
+        LONG(ADDR(.bss));
+        LONG(SIZEOF(.bss) / 4);
+        __zero_table_end__ = .;
+    } > CM55M_S_APP_ROM
+    . = ALIGN(32);
+    __unprivileged_flash_end__ = .;
+    .jcr : {
+        . = ALIGN(8);
+        KEEP (*(.jcr))
+    } > CM55M_S_APP_DATA
+    .data :
+    {
+        . = ALIGN(8);
+        __data_start__ = .;
+        __privileged_sram_start__ = .;
+        *(privileged_data)
+        *(privileged_data*)
+        . = ALIGN(8);
+        __privileged_sram_end__ = .;
+        . = ALIGN(8);
+        __data_start = .;
         *(vtable)
-       *(.data)
-       *(.data.*)
-       . = ALIGN(4);
-       PROVIDE_HIDDEN (__preinit_array_start = .);
-       KEEP(*(.preinit_array))
-       PROVIDE_HIDDEN (__preinit_array_end = .);
-       . = ALIGN(4);
-       PROVIDE_HIDDEN (__init_array_start = .);
-       KEEP(*(SORT(.init_array.*)))
-       KEEP(*(.init_array))
-       PROVIDE_HIDDEN (__init_array_end = .);
-       . = ALIGN(4);
-       PROVIDE_HIDDEN (__fini_array_start = .);
-       KEEP(*(SORT(.fini_array.*)))
-       KEEP(*(.fini_array))
-       PROVIDE_HIDDEN (__fini_array_end = .);
-       KEEP(*(.jcr*))
-       . = ALIGN(4) ;
-     __data_end__ = .;
+        *(.data .data.* .gnu.linkonce.d.*)
+        SORT(CONSTRUCTORS)
+        *(.data1)
+        . = ALIGN(8);
+        __data_end__ = .;
     } > CM55M_S_APP_DATA
-  .bss :
-  {
-    . = ALIGN(4);
-    __bss_start__ = .;
-    *(.bss)
-    *(.bss.*)
-    *(COMMON)
-    . = ALIGN(4);
-    __bss_end__ = .;
-  } > CM55M_S_APP_DATA
-    .noinit (NOLOAD): ALIGN(4)
+    .bss :
     {
-        _noinit = .;
-        PROVIDE(__start_noinit_RAM = .) ;
-        PROVIDE(__start_noinit_SRAM = .) ;
-        *(.noinit*)
-         . = ALIGN(4) ;
-        _end_noinit = .;
-       PROVIDE(__end_noinit_RAM = .) ;
-       PROVIDE(__end_noinit_SRAM = .) ;
+        . = ALIGN(8);
+        __bss_start__ = .;
+        *(.dynbss)
+        *(.bss .bss.* .gnu.linkonce.b.*)
+        *(COMMON)
+        . = ALIGN(8);
+        __bss_end__ = .;
     } > CM55M_S_APP_DATA
-   .heap (COPY) :
-   {
-     . = ALIGN(8);
-     __HeapBase = .;
-     PROVIDE(__HeapBase = .);
-     end = __HeapBase;
-     . = . + __HEAP_SIZE;
-     . = ALIGN(8);
-     __HeapLimit = .;
-     PROVIDE(__HeapLimit = .);
-   } > CM55M_S_APP_DATA
-   .stack (ORIGIN(CM55M_S_APP_DATA) + LENGTH(CM55M_S_APP_DATA) - __STACK_SIZE) (COPY) :
-   {
-     . = ALIGN(8);
-     __StackLimit = .;
-     PROVIDE(__StackLimit = .);
-     . = . + __STACK_SIZE;
-     . = ALIGN(8);
-     __StackTop = .;
-     PROVIDE(__StackTop = .);
-   } > CM55M_S_APP_DATA
-   PROVIDE(__stack = __StackTop);
-   ASSERT(__StackLimit >= __HeapLimit, "region RAM overflowed with stack")
+    .heap (COPY) :
+    {
+        . = ALIGN(8);
+        __HeapBase = .;
+        PROVIDE(__HeapBase = .);
+        end = __HeapBase;
+        FILL(0xDEAD)
+        . = . + __HEAP_SIZE;
+        . = ALIGN(8);
+        __HeapLimit = .;
+        PROVIDE(__HeapLimit = .);
+    } > CM55M_S_APP_DATA
+    .stack (ORIGIN(CM55M_S_APP_DATA) + LENGTH(CM55M_S_APP_DATA) - __STACK_SIZE - 32) (COPY) :
+    {
+        . = ALIGN(8);
+        __StackLimit = .;
+        PROVIDE(__StackLimit = .);
+        FILL(0x0000)
+        . = . + __STACK_SIZE;
+        . = ALIGN(8);
+        __StackTop = .;
+        PROVIDE(__StackTop = .);
+    } > CM55M_S_APP_DATA
+    PROVIDE(__stack = __StackTop);
+    ASSERT(__StackLimit >= __HeapLimit, "heap overflowed with stack")
     _image_start = LOADADDR(.text);
     _image_end = LOADADDR(.data) + SIZEOF(.data);
     _image_size = _image_end - _image_start;

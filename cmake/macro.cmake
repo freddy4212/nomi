@@ -1,4 +1,5 @@
 set(REQUIREDS "")
+set(REGISTERED_COMPONENTS "")
 
 function(component_register)
     set(options SHARED REQUIRED)
@@ -7,7 +8,12 @@ function(component_register)
 
     cmake_parse_arguments(COMPONENT_REGISTER "${options}" "${one_value_args}" "${multi_value_args}" ${ARGN})
 
+    if(COMPONENT_REGISTER_COMPONENT_NAME IN_LIST REGISTERED_COMPONENTS)
+      return()
+    endif()
+
     message(STATUS "Registering component ${COMPONENT_REGISTER_COMPONENT_NAME}")
+
     
     # option(ENABLE_${COMPONENT_REGISTER_COMPONENT_NAME} "Enable ${COMPONENT_REGISTER_COMPONENT_NAME}" OFF)
         
@@ -70,4 +76,9 @@ function(component_register)
 
     set(REQUIREDS ${REQUIREDS} PARENT_SCOPE)
 
+    list(APPEND REGISTERED_COMPONENTS ${COMPONENT_REGISTER_COMPONENT_NAME})
+
+    set(REGISTERED_COMPONENTS ${REGISTERED_COMPONENTS} PARENT_SCOPE)
+
 endfunction()
+
