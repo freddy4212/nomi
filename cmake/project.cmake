@@ -210,6 +210,9 @@ if(NOT "${WE2_SDK_PATH}" STREQUAL "")
         REQUIRED 
     )
 
+    # freertos
+    com
+
 else()
     message(WARNING "WE2_SDK_PATH is not set")
 endif()

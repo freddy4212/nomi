@@ -10,9 +10,6 @@ get_filename_component(ROOT_DIR "${CMAKE_CURRENT_LIST_DIR}/../../" ABSOLUTE)
 
 include(${ROOT_DIR}/cmake/toolchain-arm-none-eabi.cmake)
 
-# Disable PIC globally (-fPIC) for bare-metal ARM Cortex-M builds
-set(CMAKE_POSITION_INDEPENDENT_CODE OFF)
-
 message(STATUS "ROOT_DIR: ${ROOT_DIR}")
 
 include(${ROOT_DIR}/cmake/project.cmake)
