@@ -2,7 +2,7 @@
 
 🚀 **A comprehensive development framework for the Seeed Grove Vision AI Module V2 based on the WE2 (WiseEye 2) platform**
 
-![Grove Vision AI Module V2](https://files.seeedstudio.com/wiki/grove-vision-ai-v2/00.jpg)
+![Grove Vision AI Module V2](https://media-cdn.seeedstudio.com/media/catalog/product/cache/bb49d3ec4ee05b6f018e93f896b8a25d/4/-/4-101021112-grove-vision-ai-module-v2-45back.jpg)
 
 ## 📖 Overview
 
@@ -66,7 +66,7 @@ This project provides a complete development environment for the **Seeed Grove V
 
 3. **Set WE2 SDK Path**:
    ```bash
-   export WE2_SDK_PATH=/path/to/Seeed_Grove_Vision_AI_Module_V2
+   export WE2_SDK_PATH=/path/to/Seeed_Grove_Vision_AI_Module_V2/EPII_CM55M_APP_S
    ```
 
 3. **Verify Installation**:
@@ -92,11 +92,59 @@ cmake --build build
 ```
 
 ### 3. Flash to Device
-The build process generates:
-- `helloworld.elf` - Executable file
-- `helloworld.map` - Memory mapping file
 
-Upload the `.elf` file to your Grove Vision AI Module V2 using your preferred flashing tool.
+The build process generates the following files in the `build/` directory:
+- `<project_name>.elf` - Executable ELF file for debugging
+- `<project_name>.map` - Memory mapping file
+- `<project_name>.bin` - Binary image file for flashing (generated from `.elf` using WE2 image generator)
+
+#### Output File Locations
+```
+solutions/<example_name>/build/
+├── <project_name>.elf     # Main executable
+├── <project_name>.map     # Memory layout
+└── <project_name>.bin     # Flashable binary image
+```
+
+#### Flashing Methods
+
+**Method 1: Using python-sscma (Recommended)**
+```bash
+# Install python-sscma
+pip install python-sscma
+
+# Flash the binary file
+sscma.cli.exe flasher -f ./build/<project_name>.bin -p COMXX
+# Replace COMXX with your actual COM port (e.g., COM3, COM4)
+```
+
+**Method 2: Manual Flashing**
+For alternative flashing methods and advanced usage, refer to:
+- [python-sscma Documentation](https://github.com/Seeed-Studio/python-sscma)
+- [Grove Vision AI Module V2 Wiki](https://wiki.seeedstudio.com/Grove-Vision-AI-Module-V2/)
+
+#### Finding Your COM Port
+- **Windows**: Check Device Manager → Ports (COM & LPT)
+- **Linux**: Use `ls /dev/ttyUSB*` or `ls /dev/ttyACM*`
+- **macOS**: Use `ls /dev/tty.usb*`
+
+#### Troubleshooting Flash Issues
+```bash
+# If flash fails, try:
+# 1. List available COM ports (don't specify -p parameter)
+sscma.cli.exe flasher -f ./build/<project_name>.bin
+# This will show available COM ports for selection:
+# Multiple COM ports detected. Please select one:
+# 1. COM71
+# 2. COM72
+# Enter the number of the COM port:
+
+# 2. Reset device and retry
+# 3. Use different baud rate if needed
+sscma.cli.exe flasher -f ./build/<project_name>.bin -p COMXX -b 115200
+```
+
+For more detailed usage and advanced flashing options, visit the [python-sscma repository](https://github.com/Seeed-Studio/python-sscma).
 
 ## 📁 Project Structure
 
@@ -133,8 +181,6 @@ A simple example that demonstrates:
 
 **Features**:
 - Board initialization and configuration
-- Formatted output using `xprintf`
-- 1-second delay loop demonstration
 - Clean project structure for extension
 
 ## 🔧 Development Guide
@@ -157,7 +203,6 @@ A simple example that demonstrates:
    get_filename_component(ROOT_DIR "${CMAKE_CURRENT_LIST_DIR}/../../" ABSOLUTE)
    
    include(${ROOT_DIR}/cmake/toolchain-arm-none-eabi.cmake)
-   set(CMAKE_POSITION_INDEPENDENT_CODE OFF)
    
    include(${ROOT_DIR}/cmake/project.cmake)
    ```
@@ -261,7 +306,7 @@ component_register(
    ```bash
    # Clone the SDK first
    git clone https://github.com/HimaxWiseEyePlus/Seeed_Grove_Vision_AI_Module_V2.git
-   export WE2_SDK_PATH=/path/to/Seeed_Grove_Vision_AI_Module_V2
+   export WE2_SDK_PATH=/path/to/Seeed_Grove_Vision_AI_Module_V2/EPII_CM55M_APP_S
    ```
 
 2. **Toolchain not found**:
@@ -279,19 +324,11 @@ component_register(
    cmake --build build
    ```
 
-### Debug Output
-Use `xprintf()` for formatted debug output:
-```cpp
-#include "xprintf.h"
-
-xprintf("Debug value: %d\n", value);
-```
-
 ## 📚 Documentation
 
 ### Additional Resources
 - **WE2 SDK Repository**: [Himax WiseEye Plus SDK](https://github.com/HimaxWiseEyePlus/Seeed_Grove_Vision_AI_Module_V2)
-- **Grove Vision AI Module V2 Wiki**: [Seeed Studio Wiki](https://wiki.seeedstudio.com/Grove-Vision-AI-Module-V2/)
+- **Grove Vision AI Module V2 Wiki**: [Seeed Studio Wiki](https://wiki.seeedstudio.com/grove_vision_ai_v2)
 
 ### API Reference
 Detailed API documentation is available in the WE2 SDK documentation package.
