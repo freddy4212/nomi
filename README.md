@@ -132,7 +132,7 @@ For alternative flashing methods and advanced usage, refer to:
 ```bash
 # If flash fails, try:
 # 1. List available COM ports (don't specify -p parameter)
-sscma.cli.exe flasher -f ./build/<project_name>.bin
+sscma.cli flasher -f ./build/<project_name>.bin
 # This will show available COM ports for selection:
 # Multiple COM ports detected. Please select one:
 # 1. COM71
@@ -140,8 +140,8 @@ sscma.cli.exe flasher -f ./build/<project_name>.bin
 # Enter the number of the COM port:
 
 # 2. Reset device and retry
-# 3. Use different baud rate if needed
-sscma.cli.exe flasher -f ./build/<project_name>.bin -p COMXX -b 115200
+# 3. Flash to specify address
+sscma.cli flasher -f ./build/<project_name>.tflite -p COMXX --offset 0x4000000
 ```
 
 For more detailed usage and advanced flashing options, visit the [python-sscma repository](https://github.com/Seeed-Studio/python-sscma).
