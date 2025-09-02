@@ -106,6 +106,9 @@ SECTIONS
         _efini_array = .;
         . = ALIGN(8);
         KEEP(*(.eh_frame*))
+        __exidx_start = .;
+        *(.ARM.exidx* .gnu.linkonce.armexidx.*)
+        __exidx_end = .;
     } > CM55M_S_APP_ROM
     .rodata :
     {
@@ -138,13 +141,6 @@ SECTIONS
         . = ALIGN(4);
         *(.ARM.extab* .gnu.linkonce.armextab.*)
     } > CM55M_S_APP_ROM
-    .ARM.exidx :
-    {
-        . = ALIGN(4);
-        __exidx_start = .;
-        *(.ARM.exidx* .gnu.linkonce.armexidx.*)
-        __exidx_end = .;
-    } > CM55M_S_APP_ROM
     .copy.table :
     {
         . = ALIGN(8);
@@ -153,7 +149,7 @@ SECTIONS
         LONG(ADDR(.data));
         LONG(SIZEOF(.data) / 4);
         __copy_table_end__ = .;
-    } > CM55M_S_APP_ROM
+    } > CM55M_S_APP_DATA
     .zero.table :
     {
         . = ALIGN(8);
@@ -161,7 +157,7 @@ SECTIONS
         LONG(ADDR(.bss));
         LONG(SIZEOF(.bss) / 4);
         __zero_table_end__ = .;
-    } > CM55M_S_APP_ROM
+    } > CM55M_S_APP_DATA
     . = ALIGN(32);
     __unprivileged_flash_end__ = .;
     .jcr : {

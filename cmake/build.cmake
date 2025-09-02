@@ -26,12 +26,13 @@ target_link_options(${PROJECT_NAME}.elf PRIVATE
     -Wl,--cmse-implib
     -Wl,--start-group
     -L${WE2_SDK_PATH}/prebuilt_libs/gnu
+
   )
-  
 target_link_libraries(${PROJECT_NAME}.elf PRIVATE 
-    main ${REQUIREDS}
+    "-Wl,--whole-archive"  
+    main ${REQUIREDS}       
+    "-Wl,--no-whole-archive" 
     -lm -lc_nano -lgcc -lstdc++_nano
     -Wl,--end-group
     -Wl,--print-memory-usage
 )
-

@@ -215,9 +215,7 @@ if(NOT "${WE2_SDK_PATH}" STREQUAL "")
     component_register(
         COMPONENT_NAME spi_eeprom
         INCLUDE_DIRS ${WE2_SDK_PATH}/library/spi_eeprom
-        SRCS ${WE2_SDK_PATH}/library/common/xprintf.c
-        REQUIREDS _spi_eeprom
-        REQUIRED 
+        REQUIREDS _spi_eeprom 
     )
 
     component_register(
@@ -238,8 +236,6 @@ set(SKIP_COMPONENTS "")
 foreach(component IN LISTS COMPONENTS)
     get_filename_component(component_name ${component} NAME)
 
-    message(STATUS "Found component: ${component_name}")
-
     if(EXISTS "${component}/CMakeLists.txt" AND component_name IN_LIST REQUIREDS)
         include("${component}/CMakeLists.txt")
     else()
@@ -247,9 +243,7 @@ foreach(component IN LISTS COMPONENTS)
     endif()
 
     foreach(component IN LISTS SKIP_COMPONENTS)
-        message(STATUS "Skipping component: ${component_name}")
         get_filename_component(component_name ${component} NAME)
-        message(STATUS "REQUIRES: ${REQUIREDS}")
         if(EXISTS "${component}/CMakeLists.txt" AND component_name IN_LIST REQUIREDS)
             include("${component}/CMakeLists.txt")
         endif()
