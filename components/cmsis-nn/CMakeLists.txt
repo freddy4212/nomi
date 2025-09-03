@@ -84,6 +84,3 @@ if(TARGET cmsis-nn)
     )
 endif()
 
-message(STATUS "CMSIS-NN component configured")
-list(LENGTH CMSIS_NN_SRCS CMSIS_NN_SRCS_COUNT)
-message(STATUS "CMSIS-NN source files count: ${CMSIS_NN_SRCS_COUNT}")

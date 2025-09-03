@@ -179,8 +179,6 @@ set(ETHOS_U_SRCS
 # Combine all sources
 set(ALL_TFLM_SRCS ${TFLM_SRCS} ${CMSIS_NN_SRCS} ${ETHOS_U_SRCS})
 
-message(STATUS "TFLM source files count: ${ALL_TFLM_SRCS}")
-
 # Include directories
 set(TFLM_INCLUDE_DIRS
     ${TFLM_BASE_PATH}

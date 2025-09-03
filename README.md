@@ -291,6 +291,112 @@ component_register(
 - **device**: Core device support and startup code
 - **interface**: Driver interfaces and abstractions
 - **common**: Utility functions and common libraries
+- **cis_sensor**: Camera sensor drivers with conditional compilation support
+
+### 📷 Camera Sensor Selection
+
+The framework supports multiple camera sensors with conditional compilation. You can select which camera sensor to compile for based on your hardware configuration.
+
+#### Supported Camera Sensors
+
+| Sensor Type | Model | Max Resolution | Default Resolution | Notes |
+|-------------|-------|----------------|-------------------|-------|
+| OV5647 | OmniVision OV5647 | 2592x1944 | 640x480 | Default sensor |
+| IMX219 | Sony IMX219 | 3280x2464 | 640x480 | High resolution |
+| IMX477 | Sony IMX477 | 4056x3040 | 640x480 | Ultra high resolution |
+| IMX708 | Sony IMX708 | 2304x1296 | 640x480 | Wide format |
+| HM0360 | Himax HM0360 | 640x480 | 640x480 | Low power |
+
+#### How to Select Camera Sensor
+
+**Method 1: Set in Project CMakeLists.txt**
+```cmake
+# Before including project.cmake
+set(CAMERA_SENSOR_TYPE "OV5647")  # Replace with your desired sensor
+include(${ROOT_DIR}/cmake/project.cmake)
+```
+
+**Method 2: Pass as CMake argument**
+```bash
+cmake -B build -DCAMERA_SENSOR_TYPE=OV5647
+```
+
+**Method 3: Environment variable**
+```bash
+export CAMERA_SENSOR_TYPE=OV5647
+cmake -B build
+```
+
+#### Using Camera Sensor in Code
+
+Include the unified camera sensor header:
+```c
+#include "cis_sensor_config.h"
+
+void camera_init(void) {
+    printf("Using camera sensor: %s\n", cis_get_sensor_name());
+    
+    #if IS_SENSOR_OV5647()
+        // OV5647-specific initialization
+    #elif IS_SENSOR_IMX219()
+        // IMX219-specific initialization
+    #endif
+    
+    printf("Default resolution: %dx%d\n", SENSOR_DEFAULT_WIDTH, SENSOR_DEFAULT_HEIGHT);
+}
+```
+
+For detailed camera sensor configuration, see [Camera Sensor Selection Guide](docs/CAMERA_SENSOR_SELECTION.md).
+
+### 🎯 Event Handler Module Selection
+
+The framework supports conditional compilation of event handler modules. You can enable one or multiple modules based on your project requirements.
+
+#### Available Event Handler Modules
+
+| Module | Description |
+|--------|-------------|
+| EVT_DATAPATH | Data path event handling |
+| EVT_I2CCOMM | I2C communication event handling |
+| EVT_UARTCOMM | UART communication event handling |
+| EVT_CM55MMB | Cortex-M55 memory management block events |
+| EVT_CM55MMB_NBAPP | Cortex-M55 MMB non-blocking application events |
+| EVT_CM55MTIMER | Cortex-M55 main timer events |
+| EVT_CM55STIMER | Cortex-M55 system timer events |
+
+#### How to Select Event Handler Modules
+
+**Single Module:**
+```cmake
+set(EVENT_HANDLER_MODULES "EVT_DATAPATH")
+```
+
+**Multiple Modules:**
+```cmake
+set(EVENT_HANDLER_MODULES "EVT_DATAPATH;EVT_I2CCOMM;EVT_UARTCOMM")
+```
+
+#### Using Event Handlers in Code
+
+Include the relevant event handler headers:
+```c
+// Include specific headers based on enabled modules
+#ifdef EVT_DATAPATH_ENABLED
+#include "event_handler.h"
+#endif
+
+void app_init(void) {
+    // Check which modules are enabled
+    #ifdef EVT_DATAPATH_ENABLED
+        printf("Data path event handling enabled\n");
+    #endif
+    #ifdef EVT_I2CCOMM_ENABLED
+        printf("I2C communication event handling enabled\n");
+    #endif
+}
+```
+
+For detailed event handler configuration, see [Event Handler Selection Guide](docs/EVENT_HANDLER_SELECTION.md).
 
 ## 🛠️ Build Configuration
 

@@ -5,6 +5,10 @@ include(${ROOT_DIR}/cmake/macro.cmake)
 # choose board
 if(NOT DEFINED BOARD_NAME)
     set(BOARD_NAME "Grove Vision AI V2")
+endif()
+
+# choose linker script - can be overridden by projects
+if(NOT DEFINED LINKER_SCRIPT)
     set(LINKER_SCRIPT ${CMAKE_CURRENT_LIST_DIR}/linker/grove.ld)
 endif()
 
@@ -223,6 +227,37 @@ if(NOT "${WE2_SDK_PATH}" STREQUAL "")
         INCLUDE_DIRS ${WE2_SDK_PATH}/library/sensordp/inc ${WE2_SDK_PATH}/library/sensordp/internal_inc
         REQUIRED 
     )
+
+    component_register(
+        COMPONENT_NAME hxevent
+        INCLUDE_DIRS ${WE2_SDK_PATH}/library/hxevent
+        REQUIREDS hxevent
+    )
+
+    component_register(
+        COMPONENT_NAME hxmb
+        INCLUDE_DIRS ${WE2_SDK_PATH}/library/hxmb
+        REQUIREDS hxmb
+    )
+
+    component_register(
+        COMPONENT_NAME pwrmgmt
+        INCLUDE_DIRS ${WE2_SDK_PATH}/library/pwrmgmt ${WE2_SDK_PATH}/library/pwrmgmt/seconly_inc
+        REQUIREDS pwrmgmt
+    )
+
+    component_register(
+        COMPONENT_NAME i2c_comm
+        INCLUDE_DIRS ${WE2_SDK_PATH}/library/i2c_comm
+        REQUIREDS _i2c_comm
+    )
+
+    component_register(
+        COMPONENT_NAME spi_ptl
+        INCLUDE_DIRS ${WE2_SDK_PATH}/library/spi_ptl
+        REQUIREDS _spi_ptl
+    )
+
 
 else()
     message(WARNING "WE2_SDK_PATH is not set")
