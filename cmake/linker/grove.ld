@@ -2,7 +2,7 @@ MEMORY
 {
   CM55M_S_APP_ROM (rx) : ORIGIN = 0x10000000, LENGTH = 0x40000
   CM55M_S_APP_DATA (rwx) : ORIGIN = 0x30000000, LENGTH = 0x40000
-  CM55M_S_SRAM (rwx) : ORIGIN = ((0x34001000 +0x00004000)+0x0001A000), LENGTH = 0x00200000-(((0x34001000 +0x00004000)+0x0001A000)-(0x34000000))
+  CM55M_S_SRAM (rwx) : ORIGIN = 0x34000000, LENGTH = 0x00200000
 }
 __HEAP_SIZE = 0x10000;
 __STACK_SIZE = 0x10000;
@@ -29,11 +29,6 @@ SECTIONS
         __syscalls_flash_end__ = (. - 1);
         __unprivileged_flash_start__ = .;
     } > CM55M_S_APP_ROM
-    .text_2 : ALIGN(4)
-    {
-        *libdriver.*:*(.text* .rodata*)
-        *cvapp.o (.text* .rodata*)
-    } > CM55M_S_SRAM
     .text : ALIGN(4)
     {
        *(.text*)
@@ -54,14 +49,10 @@ SECTIONS
         . = ALIGN(4);
         KEEP(*(.eh_frame*))
     } > CM55M_S_APP_ROM
-    .model : ALIGN(4)
+    .ucHeap :
     {
-        *person_detect_model_data_vela.*.o*(.text* .rodata*)
-    } > CM55M_S_SRAM
-    .noinit (NOLOAD): ALIGN(4)
-    {
-        *(.bss.NoInit*)
-        *(.noinit*)
+        . = ALIGN(8);
+        *(.bss.ucHeap)
     } > CM55M_S_SRAM
     .rodata : ALIGN(4)
     {

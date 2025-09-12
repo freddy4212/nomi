@@ -49,15 +49,15 @@ static const struct imx219_reg imx219_640x480_regs[] = {
     {0x0161, 0x75}, /* FRM_LENGTH_A_LSB */
     {0x0162, 0x0D}, /* LINE_LENGTH_A_MSB */
     {0x0163, 0x78}, /* LINE_LENGTH_A_LSB */
-    /* Crop settings - center crop for 640x480 */
-    {0x0164, 0x03}, /* X_ADD_STA_A_MSB - start X = 1000 */
-    {0x0165, 0xE8}, /* X_ADD_STA_A_LSB */
-    {0x0166, 0x08}, /* X_ADD_END_A_MSB - end X = 2279 */
-    {0x0167, 0xE7}, /* X_ADD_END_A_LSB */
-    {0x0168, 0x02}, /* Y_ADD_STA_A_MSB - start Y = 752 */
-    {0x0169, 0xF0}, /* Y_ADD_STA_A_LSB */
-    {0x016A, 0x06}, /* Y_ADD_END_A_MSB - end Y = 1711 */
-    {0x016B, 0xAF}, /* Y_ADD_END_A_LSB */
+    /* Crop settings */
+    {0x0164, 0x01}, /* X_ADD_STA_A_MSB */
+    {0x0165, 0x68}, /* X_ADD_STA_A_LSB */
+    {0x0166, 0x0B}, /* X_ADD_END_A_MSB */
+    {0x0167, 0x67}, /* X_ADD_END_A_LSB */
+    {0x0168, 0x02}, /* Y_ADD_STA_A_MSB */
+    {0x0169, 0x00}, /* Y_ADD_STA_A_LSB */
+    {0x016A, 0x09}, /* Y_ADD_END_A_MSB */
+    {0x016B, 0x9F}, /* Y_ADD_END_A_LSB */
     /* Output size */
     {0x016C, 0x02}, /* X_OUTPUT_SIZE_MSB */
     {0x016D, 0x80}, /* X_OUTPUT_SIZE_LSB (640) */
@@ -69,8 +69,8 @@ static const struct imx219_reg imx219_640x480_regs[] = {
     {0x0174, 0x03}, /* BINNING_MODE_H_A */
     {0x0175, 0x03}, /* BINNING_MODE_V_A */
     /* CSI Data Format */
-    {0x018C, 0x08}, /* CSI_DATA_FORMAT_A_MSB */
-    {0x018D, 0x08}, /* CSI_DATA_FORMAT_A_LSB */
+    {0x018C, 0x0A}, /* CSI_DATA_FORMAT_A_MSB */
+    {0x018D, 0x0A}, /* CSI_DATA_FORMAT_A_LSB */
     /* PLL settings */
     {0x0301, 0x05}, /* VTPXCK_DIV */
     {0x0303, 0x01}, /* VTSYCK_DIV */
@@ -97,8 +97,8 @@ static const struct imx219_reg imx219_640x480_regs[] = {
     {0x479B, 0x0E}, /* CIS_TUNING_107 */
     /* Initial exposure and gain settings for proper brightness */
     {0x0157, 0x80}, /* ANALOG_GAIN_GLOBAL - moderate gain */
-    {0x015A, 0x40}, /* COARSE_INTEGRATION_TIME_MSB */
-    {0x015B, 0x40}, /* COARSE_INTEGRATION_TIME_LSB */
+    {0x015A, 0x10}, /* COARSE_INTEGRATION_TIME_MSB */
+    {0x015B, 0x00}, /* COARSE_INTEGRATION_TIME_LSB */
     {0xFFFF, 0xFF}  /* End marker */
 };
 
@@ -119,15 +119,15 @@ static const struct imx219_reg imx219_1280x720_regs[] = {
     {0x0161, 0xFD}, /* FRM_LENGTH_A_LSB */
     {0x0162, 0x0D}, /* LINE_LENGTH_A_MSB */
     {0x0163, 0x78}, /* LINE_LENGTH_A_LSB */
-    /* Crop settings - center crop for 1280x720 */
-    {0x0164, 0x03}, /* X_ADD_STA_A_MSB - start X = 1000 */
-    {0x0165, 0xE8}, /* X_ADD_STA_A_LSB */
-    {0x0166, 0x08}, /* X_ADD_END_A_MSB - end X = 2279 */
-    {0x0167, 0xE7}, /* X_ADD_END_A_LSB */
-    {0x0168, 0x03}, /* Y_ADD_STA_A_MSB - start Y = 872 */
-    {0x0169, 0x68}, /* Y_ADD_STA_A_LSB */
-    {0x016A, 0x06}, /* Y_ADD_END_A_MSB - end Y = 1591 */
-    {0x016B, 0x37}, /* Y_ADD_END_A_LSB */
+    /* Crop settings */
+    {0x0164, 0x02}, /* X_ADD_STA_A_MSB */
+    {0x0165, 0xA8}, /* X_ADD_STA_A_LSB */
+    {0x0166, 0x0A}, /* X_ADD_END_A_MSB */
+    {0x0167, 0x27}, /* X_ADD_END_A_LSB */
+    {0x0168, 0x02}, /* Y_ADD_STA_A_MSB */
+    {0x0169, 0xB4}, /* Y_ADD_STA_A_LSB */
+    {0x016A, 0x06}, /* Y_ADD_END_A_MSB */
+    {0x016B, 0xEB}, /* Y_ADD_END_A_LSB */
     /* Output size */
     {0x016C, 0x05}, /* X_OUTPUT_SIZE_MSB */
     {0x016D, 0x00}, /* X_OUTPUT_SIZE_LSB (1280) */
@@ -167,7 +167,7 @@ static const struct imx219_reg imx219_1280x720_regs[] = {
     {0x479B, 0x0E}, /* CIS_TUNING_107 */
     /* Initial exposure and gain settings for proper brightness */
     {0x0157, 0x80}, /* ANALOG_GAIN_GLOBAL - moderate gain */
-    {0x015A, 0x01}, /* COARSE_INTEGRATION_TIME_MSB */
+    {0x015A, 0x10}, /* COARSE_INTEGRATION_TIME_MSB */
     {0x015B, 0x00}, /* COARSE_INTEGRATION_TIME_LSB */
     {0xFFFF, 0xFF}  /* End marker */
 };
@@ -189,15 +189,15 @@ static const struct imx219_reg imx219_1920x1080_regs[] = {
     {0x0161, 0x5F}, /* FRM_LENGTH_A_LSB */
     {0x0162, 0x0D}, /* LINE_LENGTH_A_MSB */
     {0x0163, 0x78}, /* LINE_LENGTH_A_LSB */
-    /* Crop settings - center crop for 1920x1080 */
-    {0x0164, 0x02}, /* X_ADD_STA_A_MSB - start X = 680 */
+    /* Crop settings */
+    {0x0164, 0x02}, /* X_ADD_STA_A_MSB */
     {0x0165, 0xA8}, /* X_ADD_STA_A_LSB */
-    {0x0166, 0x0A}, /* X_ADD_END_A_MSB - end X = 2599 */
+    {0x0166, 0x0A}, /* X_ADD_END_A_MSB */
     {0x0167, 0x27}, /* X_ADD_END_A_LSB */
-    {0x0168, 0x02}, /* Y_ADD_STA_A_MSB - start Y = 692 */
-    {0x0169, 0xB4}, /* Y_ADD_STA_A_LSB */
-    {0x016A, 0x06}, /* Y_ADD_END_A_MSB - end Y = 1771 */
-    {0x016B, 0xEB}, /* Y_ADD_END_A_LSB */
+    {0x0168, 0x01}, /* Y_ADD_STA_A_MSB */
+    {0x0169, 0x42}, /* Y_ADD_STA_A_LSB */
+    {0x016A, 0x08}, /* Y_ADD_END_A_MSB */
+    {0x016B, 0x81}, /* Y_ADD_END_A_LSB */
     /* Output size */
     {0x016C, 0x07}, /* X_OUTPUT_SIZE_MSB */
     {0x016D, 0x80}, /* X_OUTPUT_SIZE_LSB (1920) */
@@ -237,7 +237,7 @@ static const struct imx219_reg imx219_1920x1080_regs[] = {
     {0x479B, 0x0E}, /* CIS_TUNING_107 */
     /* Initial exposure and gain settings for proper brightness */
     {0x0157, 0x80}, /* ANALOG_GAIN_GLOBAL - moderate gain */
-    {0x015A, 0x01}, /* COARSE_INTEGRATION_TIME_MSB */
+    {0x015A, 0x10}, /* COARSE_INTEGRATION_TIME_MSB */
     {0x015B, 0x00}, /* COARSE_INTEGRATION_TIME_LSB */
     {0xFFFF, 0xFF}  /* End marker */
 };
@@ -307,7 +307,7 @@ static const struct imx219_reg imx219_3280x2464_regs[] = {
     {0x479B, 0x0E}, /* CIS_TUNING_107 */
     /* Initial exposure and gain settings for proper brightness */
     {0x0157, 0x80}, /* ANALOG_GAIN_GLOBAL - moderate gain */
-    {0x015A, 0x01}, /* COARSE_INTEGRATION_TIME_MSB */
+    {0x015A, 0x10}, /* COARSE_INTEGRATION_TIME_MSB */
     {0x015B, 0x00}, /* COARSE_INTEGRATION_TIME_LSB */
     {0xFFFF, 0xFF}  /* End marker */
 };
@@ -326,28 +326,28 @@ static const struct
         .width = 640,
         .height = 480,
         .fps = 30,
-        .fourcc = MPIX_FMT_SBGGR8,
+        .fourcc = MPIX_FMT_SRGGB8,
     },
     [IMX219_MODE_1280x720_30FPS] = {
         .regs = imx219_1280x720_regs,
         .width = 1280,
         .height = 720,
         .fps = 30,
-        .fourcc = MPIX_FMT_SBGGR8,
+        .fourcc = MPIX_FMT_SRGGB8,
     },
     [IMX219_MODE_1920x1080_15FPS] = {
         .regs = imx219_1920x1080_regs,
         .width = 1920,
         .height = 1080,
         .fps = 15,
-        .fourcc = MPIX_FMT_SBGGR8,
+        .fourcc = MPIX_FMT_SRGGB8,
     },
     [IMX219_MODE_3280x2464_15FPS] = {
         .regs = imx219_3280x2464_regs,
         .width = 3280,
         .height = 2464,
         .fps = 15,
-        .fourcc = MPIX_FMT_SBGGR8,
+        .fourcc = MPIX_FMT_SRGGB8,
     },
 };
 
@@ -478,7 +478,7 @@ static int imx219_get_capabilities(const struct mpix_sensor *sensor,
         return -EINVAL;
     }
 
-    caps->fourcc = MPIX_FMT_SBGGR8;
+    caps->fourcc = MPIX_FMT_SRGGB8;
     caps->max_width = 3280;
     caps->max_height = 2464;
     caps->min_width = 640;
@@ -515,7 +515,7 @@ static int imx219_set_format(const struct mpix_sensor *sensor,
         return -EINVAL;
     }
 
-    // if (format->fourcc != MPIX_FMT_SBGGR8)
+    // if (format->fourcc != MPIX_FMT_SRGGB8)
     // {
     //     return -ENOTSUP;
     // }
@@ -553,7 +553,7 @@ static int imx219_set_format(const struct mpix_sensor *sensor,
     const mipi_csi_config_t csi_config = {
         .clock_freq_mhz = 456, /* IMX219 MIPI clock frequency */
         .lane_count = MIPI_CSI_LANE_2,
-        .pixel_depth = MIPI_CSI_PIXEL_DEPTH_8,
+        .pixel_depth = MIPI_CSI_PIXEL_DEPTH_10,
         .clock_mode = MIPI_CSI_CLK_MODE_CONTINUOUS,
         .deskew_enable = false};
     mipi_csi_configure(&csi_config);
@@ -563,7 +563,7 @@ static int imx219_set_format(const struct mpix_sensor *sensor,
     const datapath_config_t dp_config = {
         .width = format->width,
         .height = format->height,
-        .pixel_depth = 8, /* IMX219 outputs 10-bit */
+        .pixel_depth = 10, /* IMX219 outputs 10-bit */
         .enable_crop = false,
         .crop_x = 0,
         .crop_y = 0,

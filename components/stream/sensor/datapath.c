@@ -20,7 +20,6 @@ static void _dp_event_cb(SENSORDPLIB_STATUS_E event)
     switch (event)
     {
     case SENSORDPLIB_STATUS_XDMA_FRAME_READY:
-        MPIX_INF("Frame ready");
         g_frame_ready = true;
         break;
     default:
@@ -134,5 +133,16 @@ int datapath_get_status(void)
 int datapath_deinit(void)
 {
     MPIX_INF("Datapath deinitialized");
+    g_datapath_initialized = false;
+    g_datapath_running = false;
+    g_frame_ready = false;
+    if (g_wdma2_baseaddr)
+    {
+        mpix_port_free((void *)g_wdma2_baseaddr);
+        g_wdma2_baseaddr = 0;
+    }
+
+
+    
     return 0;
 }
