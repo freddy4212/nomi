@@ -20,9 +20,7 @@ extern "C" {
 /* IMX219 supported resolutions */
 typedef enum {
     IMX219_MODE_640x480_30FPS = 0,
-    IMX219_MODE_1280x720_30FPS,
-    IMX219_MODE_1920x1080_15FPS,
-    IMX219_MODE_3280x2464_15FPS,
+    IMX219_MODE_1280x960_30FPS,
     IMX219_MODE_MAX
 } imx219_mode_t;
 

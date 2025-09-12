@@ -24,9 +24,7 @@ extern "C" {
 /* OV5647 supported resolutions */
 typedef enum {
     OV5647_MODE_640x480_30FPS = 0,
-    OV5647_MODE_1280x720_30FPS,
-    OV5647_MODE_1920x1080_15FPS,
-    OV5647_MODE_2592x1944_15FPS,
+    OV5647_MODE_1280x960_30FPS,
     OV5647_MODE_MAX
 } ov5647_mode_t;
 

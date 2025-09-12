@@ -1,4 +1,6 @@
 #include <stdio.h>
+#include <console_io.h>
+#include <hx_drv_uart.h>
 #include "WE2_device.h"
 #include "WE2_core.h"
 #include "board.h"
@@ -8,6 +10,9 @@
 /* Simple image transfer protocol */
 #define FRAME_HEADER 0xAA55AA55
 #define FRAME_FOOTER 0x55AA55AA
+
+static DEV_UART *_uart = NULL;
+static volatile bool _tx_busy = false;
 
 typedef struct
 {
@@ -34,6 +39,11 @@ static uint16_t calculate_checksum(const uint8_t *data, uint32_t size)
         sum += data[i];
     }
     return (uint16_t)(sum & 0xFFFF);
+}
+
+static void _uart_dma_send(void *)
+{
+    _tx_busy = false;
 }
 
 /* Send image through serial port */
@@ -63,9 +73,18 @@ static void send_image_frame(uint32_t frame_id, const struct mpix_image *image)
 
     /* Send image data */
     uint8_t *data_bytes = (uint8_t *)image->buffer;
-    for (uint32_t i = 0; i < image->size; i++)
+    // send each 4095 chunks
+    const int chunk_size = 4095;
+    int bytes_sent = 0;
+    while (bytes_sent < image->size)
     {
-        xprintf("%c", data_bytes[i]);
+        _tx_busy = true;
+        int bytes_to_send = (image->size - bytes_sent) > chunk_size ? chunk_size : (image->size - bytes_sent);
+        SCB_CleanDCache_by_Addr((uint32_t *)(data_bytes + bytes_sent), bytes_to_send);
+        _uart->uart_write_udma(data_bytes + bytes_sent, bytes_to_send, _uart_dma_send);
+        while (_tx_busy)
+            ;
+        bytes_sent += bytes_to_send;
     }
 
     /* Send footer */
@@ -82,6 +101,18 @@ int main(void)
 
     board_init();
 
+    _uart = hx_drv_uart_get_dev(USE_DW_UART_0);
+    if (_uart == NULL)
+    {
+        return 0;
+    }
+
+    int ret = _uart->uart_open(UART_BAUDRATE_921600);
+    if (ret != 0)
+    {
+        return 0;
+    }
+
     struct mpix_sensor *sensor = sensor_probe();
     if (!sensor)
     {
@@ -97,9 +128,8 @@ int main(void)
     }
 
     mpix_sensor_set_format(sensor, &(struct mpix_sensor_format){
-                                       .width = 640,
-                                       .height = 480,
-
+                                       .width = 1280,
+                                       .height = 960,
                                    });
     mpix_sensor_start_stream(sensor);
 
@@ -114,8 +144,8 @@ int main(void)
             frame_counter++;
 
             /* Send debug info as text first */
-            xprintf("FRAME_START:%d,%d,%d,%d\n",
-                    frame_counter, image.width, image.height, image.size);
+            xprintf("FRAME_START:%d,%d,%d,%d %d\n",
+                    frame_counter, image.width, image.height, image.size, mpix_port_get_uptime_us());
 
             /* Send binary image data */
             send_image_frame(frame_counter, &image);

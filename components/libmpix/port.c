@@ -18,7 +18,7 @@
 
 #ifndef FREERTOS
 /* Static memory pool configuration - only used when FreeRTOS is not available */
-#define MPIX_MEMORY_POOL_SIZE (512 * 1024) /* 512KB memory pool */
+#define MPIX_MEMORY_POOL_SIZE (1024 * 1024) /* 512KB memory pool */
 #define MPIX_MAX_ALLOCATIONS 64           /* Maximum number of allocations */
 
 /* Memory block header */
@@ -30,7 +30,7 @@ typedef struct mpix_mem_block
 } mpix_mem_block_t;
 
 /* Static memory pool */
-__attribute__((section(".bss.NoInit"))) static uint8_t g_memory_pool[MPIX_MEMORY_POOL_SIZE] __ALIGNED(32);
+__attribute__((section(".bss.ucHeap"))) static uint8_t g_memory_pool[MPIX_MEMORY_POOL_SIZE] __ALIGNED(32);
 static mpix_mem_block_t g_mem_blocks[MPIX_MAX_ALLOCATIONS];
 static size_t g_pool_offset = 0;
 static int g_pool_initialized = 0;

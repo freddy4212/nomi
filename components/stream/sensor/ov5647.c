@@ -151,8 +151,8 @@ static const struct ov5647_reg ov5647_640x480_regs[] = {
     {0xFFFF, 0xFF} /* End marker */
 };
 
-/* 1296x972 configuration - based on reference driver */
-static const struct ov5647_reg ov5647_1296x972_regs[] = {
+/* 1280x960 configuration - based on reference driver */
+static const struct ov5647_reg ov5647_1280x960_regs[] = {
     {0x3000, 0x0f},
     {0x3001, 0xff},
     {0x3002, 0xe4},
@@ -190,23 +190,23 @@ static const struct ov5647_reg ov5647_1296x972_regs[] = {
     {0x3b07, 0x0c},
     /* Crop settings */
     {0x3800, 0x00}, /* X start high */
-    {0x3801, 0x00}, /* X start low */
+    {0x3801, 0x18}, /* X start low */
     {0x3802, 0x00}, /* Y start high */
-    {0x3803, 0x00}, /* Y start low */
+    {0x3803, 0x0c}, /* Y start low */
     {0x3804, 0x0a}, /* X end high */
-    {0x3805, 0x3f}, /* X end low */
+    {0x3805, 0x27}, /* X end low */
     {0x3806, 0x07}, /* Y end high */
-    {0x3807, 0xa3}, /* Y end low */
+    {0x3807, 0x97}, /* Y end low */
     /* Output size */
     {0x3808, 0x05}, /* Width high */
-    {0x3809, 0x10}, /* Width low (1296) */
+    {0x3809, 0x00}, /* Width low (1280) */
     {0x380a, 0x03}, /* Height high */
-    {0x380b, 0xcc}, /* Height low (972) */
+    {0x380b, 0xc0}, /* Height low (960) */
     /* Timing settings */
     {0x380c, 0x0a}, /* HTS high */
     {0x380d, 0x8c}, /* HTS low */
-    {0x3811, 0x0c},
-    {0x3813, 0x06},
+    {0x3811, 0x04},
+    {0x3813, 0x02},
     {0x3814, 0x31},
     {0x3815, 0x31},
     /* Additional sensor settings */
@@ -329,20 +329,13 @@ static const struct
         .regs = ov5647_640x480_regs,
         .width = 640,
         .height = 480,
-        .fps = 30,
+        .fps = 15,
         .fourcc = MPIX_FMT_SBGGR8,
     },
-    [OV5647_MODE_1280x720_30FPS] = {
-        .regs = ov5647_1296x972_regs, /* Use 1296x972 as closest to 720p */
-        .width = 1296,
-        .height = 972,
-        .fps = 30,
-        .fourcc = MPIX_FMT_SBGGR8,
-    },
-    [OV5647_MODE_1920x1080_15FPS] = {
-        .regs = ov5647_1296x972_regs, /* Use 1296x972 as base */
-        .width = 1296,
-        .height = 972,
+    [OV5647_MODE_1280x960_30FPS] = {
+        .regs = ov5647_1280x960_regs,
+        .width = 1280,
+        .height = 960,
         .fps = 15,
         .fourcc = MPIX_FMT_SBGGR8,
     },
@@ -794,9 +787,9 @@ static int ov5647_get_frame(struct mpix_sensor *sensor, struct mpix_image *image
     image->height = ctx->current_format.height;
     image->fourcc = ctx->current_format.fourcc;
     image->buffer = (uint8_t *)datapath_acquire_raw_buffer();
-    image->size = image->width * image->height; 
+    image->size = image->width * image->height;
 
-        /* For now, return not supported */
+    /* For now, return not supported */
     return 0;
 }
 
