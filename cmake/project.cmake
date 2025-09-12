@@ -12,7 +12,6 @@ if(NOT DEFINED LINKER_SCRIPT)
     set(LINKER_SCRIPT ${CMAKE_CURRENT_LIST_DIR}/linker/grove.ld)
 endif()
 
-
 if(NOT "${WE2_SDK_PATH}" STREQUAL "")
     message(STATUS "WE2_SDK_PATH: ${WE2_SDK_PATH}")
 

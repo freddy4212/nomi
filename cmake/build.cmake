@@ -5,7 +5,7 @@ configure_file(
 )
 
 
-include_directories(${PROJECT_NAME}  ${CMAKE_CURRENT_BINARY_DIR})
+include_directories(${PROJECT_NAME}  ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_BINARY_DIR}/include)
 
 file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/dummy.c "")
 
@@ -49,6 +49,7 @@ if(EXISTS "${WE2_SDK_PATH}/../we2_image_gen_local")
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             ${WE2_IMAGE_GEN_DIR}/output_case1_sec_wlcsp/output.img
             ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}.bin
+        COMMAND ${CMAKE_COMMAND} -E echo "IMG file generated at ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}.bin"
         
         COMMENT "Converting ELF to IMG using WE2 image generator"
         VERBATIM
