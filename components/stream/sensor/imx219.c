@@ -97,7 +97,7 @@ static const struct imx219_reg imx219_640x480_regs[] = {
     {0x479B, 0x0E}, /* CIS_TUNING_107 */
     /* Initial exposure and gain settings for proper brightness */
     {0x0157, 0x80}, /* ANALOG_GAIN_GLOBAL - moderate gain */
-    {0x015A, 0x0D}, /* COARSE_INTEGRATION_TIME_MSB */
+    {0x015A, 0x20}, /* COARSE_INTEGRATION_TIME_MSB */
     {0x015B, 0x00}, /* COARSE_INTEGRATION_TIME_LSB */
     {0xFFFF, 0xFF}  /* End marker */
 };
@@ -224,14 +224,14 @@ static const struct
         .width = 640,
         .height = 480,
         .fps = 30,
-        .fourcc = MPIX_FMT_SRGGB8,
+        .fourcc = MPIX_FMT_SBGGR8,
     },
     [IMX219_MODE_1280x960_30FPS] = {
         .regs = imx219_1280x960_regs,
         .width = 1280,
         .height = 960,
         .fps = 30,
-        .fourcc = MPIX_FMT_SRGGB8,
+        .fourcc = MPIX_FMT_SBGGR8,
     },
 };
 
@@ -362,7 +362,7 @@ static int imx219_get_capabilities(const struct mpix_sensor *sensor,
         return -EINVAL;
     }
 
-    caps->fourcc = MPIX_FMT_SRGGB8;
+    caps->fourcc = MPIX_FMT_SBGGR8;
     caps->max_width = 1280;
     caps->max_height = 960;
     caps->min_width = 640;
@@ -670,7 +670,7 @@ static int imx219_get_frame(struct mpix_sensor *sensor, struct mpix_image *image
 
     image->width = ctx->current_format.width;
     image->height = ctx->current_format.height;
-    image->fourcc = ctx->current_format.fourcc;
+    image->fourcc = MPIX_FMT_SBGGR8; 
     image->buffer = (uint8_t *)datapath_acquire_raw_buffer();
     image->size = image->width * image->height;
 

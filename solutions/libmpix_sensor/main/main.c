@@ -6,7 +6,15 @@
 #include "board.h"
 #include "xprintf.h"
 #include <mpix/sensor.h>
-
+#include <mpix/image.h>
+#include <mpix/formats.h>
+#include <mpix/stats.h>
+#include <mpix/auto.h>
+#include <mpix/op_correction.h>
+#include <mpix/op_kernel.h>
+#include <mpix/op_resize.h>
+#include <mpix/op_palettize.h>
+#include <mpix/port.h>
 /* Simple image transfer protocol */
 #define FRAME_HEADER 0xAA55AA55
 #define FRAME_FOOTER 0x55AA55AA
@@ -66,17 +74,18 @@ static void send_image_frame(uint32_t frame_id, const struct mpix_image *image)
 
     /* Send header (as binary data through xprintf with %c) */
     uint8_t *header_bytes = (uint8_t *)&header;
-    for (int i = 0; i < sizeof(header); i++)
-    {
-        xprintf("%c", header_bytes[i]);
-    }
+    SCB_CleanDCache_by_Addr((uint32_t *)header_bytes, sizeof(header));
+    _tx_busy = true;
+    _uart->uart_write_udma(header_bytes, sizeof(header), _uart_dma_send);
+    while (_tx_busy)
+        ;
 
     /* Send image data */
     uint8_t *data_bytes = (uint8_t *)image->buffer;
     // send each 4095 chunks
     const int chunk_size = 4095;
     int bytes_sent = 0;
-    while (bytes_sent <= image->size)
+    while (bytes_sent < image->size)
     {
         _tx_busy = true;
         int bytes_to_send = (image->size - bytes_sent) > chunk_size ? chunk_size : (image->size - bytes_sent);
@@ -89,10 +98,11 @@ static void send_image_frame(uint32_t frame_id, const struct mpix_image *image)
 
     /* Send footer */
     uint8_t *footer_bytes = (uint8_t *)&footer;
-    for (int i = 0; i < sizeof(footer); i++)
-    {
-        xprintf("%c", footer_bytes[i]);
-    }
+    SCB_CleanDCache_by_Addr((uint32_t *)footer_bytes, sizeof(footer));
+    _tx_busy = true;
+    _uart->uart_write_udma(footer_bytes, sizeof(footer), _uart_dma_send);
+    while (_tx_busy)
+        ;
 }
 
 int main(void)
@@ -132,26 +142,58 @@ int main(void)
                                        .height = 960,
                                    });
     mpix_sensor_start_stream(sensor);
-
     xprintf("Starting image transmission...\n");
     board_delay_ms(1000); /* Give time for startup message */
-
+    struct mpix_image jpeg = {};
+    struct mpix_stats stats = {};
+    struct mpix_auto_ctrls ctrls = {};
+    jpeg.buffer = mpix_port_alloc(128 * 1024);
+    jpeg.size = 128 * 1024;
     while (1)
     {
-        struct mpix_image image;
+        struct mpix_image image = {};
+
         if (mpix_sensor_get_frame(sensor, &image, 1000) == 0)
         {
             frame_counter++;
+            // mpix_stats_print(&stats);
+
+            mpix_image_stats(&image, &stats);
+
+            mpix_auto_black_level(&ctrls, &stats);
+            mpix_auto_white_balance(&ctrls, &stats);
+
+            /* Convert from raw bayer to RGB24 */
+            mpix_image_debayer(&image, 3);
+
+            // mpix_stats_print(&stats);
+
+            /* Apply all the color correction to the palette only */
+            // mpix_image_correction(&image, MPIX_CORRECTION_BLACK_LEVEL, &ctrls.correction.black_level);
+            mpix_image_correction(&image, MPIX_CORRECTION_WHITE_BALANCE, &ctrls.correction.white_balance);
+            // mpix_image_correction(&image, MPIX_CORRECTION_GAMMA, &ctrls.correction.gamma);
+
+            // mpix_image_kernel(&image, MPIX_KERNEL_DENOISE, 3);
+            // mpix_image_kernel(&image, MPIX_KERNEL_SHARPEN, 3);
+
+            mpix_image_jpeg_encode(&image, JPEGE_Q_MED);
+
+            mpix_image_to_buf(&image, jpeg.buffer, 128 * 1024);
+            jpeg.width = image.width;
+            jpeg.height = image.height;
+            jpeg.fourcc = MPIX_FMT_JPEG;
+            jpeg.err = 0;
+            jpeg.size = image.size;
 
             /* Send debug info as text first */
-            xprintf("FRAME_START:%d,%d,%d,%d %d\n",
-                    frame_counter, image.width, image.height, image.size, mpix_port_get_uptime_us());
+            xprintf("FRAME_START:%d,%d,%d,%d\n",
+                    frame_counter, image.width, image.height, image.size);
 
             /* Send binary image data */
-            send_image_frame(frame_counter, &image);
+            send_image_frame(frame_counter, &jpeg);
 
             /* Send debug info as text after */
-            xprintf("FRAME_END:%d\n", frame_counter);
+            xprintf("FRAME_END\n", frame_counter);
 
             mpix_sensor_release_frame(sensor, &image);
         }
