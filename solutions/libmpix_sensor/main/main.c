@@ -15,6 +15,8 @@
 #include <mpix/op_resize.h>
 #include <mpix/op_palettize.h>
 #include <mpix/port.h>
+#include <mpix/transport.h>
+#include <mpix/transport/uart.h>
 #include "FreeRTOS.h"
 #include "task.h"
 
@@ -22,8 +24,8 @@
 #define FRAME_HEADER 0xAA55AA55
 #define FRAME_FOOTER 0x55AA55AA
 
-static DEV_UART *_uart = NULL;
-static volatile bool _tx_busy = false;
+// Remove direct DEV_UART usage; use transport abstraction
+static struct mpix_transport g_uart_transport; /* UART transport instance */
 
 typedef struct
 {
@@ -52,18 +54,30 @@ static uint16_t calculate_checksum(const uint8_t *data, uint32_t size)
     return (uint16_t)(sum & 0xFFFF);
 }
 
-static void _uart_dma_send(void *)
+/* Send image through UART transport */
+static int _transport_send_all(struct mpix_transport *t, const uint8_t *buf, size_t len)
 {
-    _tx_busy = false;
+    size_t sent = 0;
+    while (sent < len)
+    {
+        int rc = mpix_transport_send(t, buf + sent, len - sent);
+        if (rc < 0)
+            return rc;
+        if (rc == 0)
+        {
+            taskYIELD();
+            continue;
+        }
+        sent += (size_t)rc;
+    }
+    return (int)sent;
 }
 
-/* Send image through serial port */
 static void send_image_frame(uint32_t frame_id, const struct mpix_image *image)
 {
     image_frame_header_t header;
     image_frame_footer_t footer;
 
-    /* Prepare header */
     header.header = FRAME_HEADER;
     header.frame_id = frame_id;
     header.width = image->width;
@@ -71,41 +85,11 @@ static void send_image_frame(uint32_t frame_id, const struct mpix_image *image)
     header.data_size = image->size;
     header.checksum = calculate_checksum((const uint8_t *)image->buffer, image->size);
     header.reserved = 0;
-
-    /* Prepare footer */
     footer.footer = FRAME_FOOTER;
 
-    /* Send header (as binary data through xprintf with %c) */
-    uint8_t *header_bytes = (uint8_t *)&header;
-    SCB_CleanDCache_by_Addr((uint32_t *)header_bytes, sizeof(header));
-    _tx_busy = true;
-    _uart->uart_write_udma(header_bytes, sizeof(header), _uart_dma_send);
-    while (_tx_busy)
-        ;
-
-    /* Send image data */
-    uint8_t *data_bytes = (uint8_t *)image->buffer;
-    // send each 4095 chunks
-    const int chunk_size = 4095;
-    int bytes_sent = 0;
-    while (bytes_sent < image->size)
-    {
-        _tx_busy = true;
-        int bytes_to_send = (image->size - bytes_sent) > chunk_size ? chunk_size : (image->size - bytes_sent);
-        SCB_CleanDCache_by_Addr((uint32_t *)(data_bytes + bytes_sent), bytes_to_send);
-        _uart->uart_write_udma(data_bytes + bytes_sent, bytes_to_send, _uart_dma_send);
-        while (_tx_busy)
-            ;
-        bytes_sent += bytes_to_send;
-    }
-
-    /* Send footer */
-    uint8_t *footer_bytes = (uint8_t *)&footer;
-    SCB_CleanDCache_by_Addr((uint32_t *)footer_bytes, sizeof(footer));
-    _tx_busy = true;
-    _uart->uart_write_udma(footer_bytes, sizeof(footer), _uart_dma_send);
-    while (_tx_busy)
-        ;
+    _transport_send_all(&g_uart_transport, (uint8_t *)&header, sizeof(header));
+    _transport_send_all(&g_uart_transport, (const uint8_t *)image->buffer, image->size);
+    _transport_send_all(&g_uart_transport, (uint8_t *)&footer, sizeof(footer));
 }
 
 /* Task configuration */
@@ -117,13 +101,22 @@ static void camera_task(void *pvParameters)
     (void)pvParameters;
     static uint32_t frame_counter = 0;
 
-    _uart = hx_drv_uart_get_dev(USE_DW_UART_0);
-    if (_uart == NULL)
+    // Initialize UART transport
+    struct mpix_transport_uart_config cfg;
+    mpix_transport_uart_config_default(&cfg);
+    cfg.port_id = USE_DW_UART_0;
+    cfg.baudrate = UART_BAUDRATE_921600;
+    cfg.tx_chunk = 4095;              // max chunk
+    cfg.send_buffer_size = 64 * 1024; // larger TX ring for burst frames
+    cfg.recv_buffer_size = 4 * 1024;  // modest RX ring
+    if (mpix_transport_uart_create_with_config(&g_uart_transport, &cfg) != 0)
     {
+        xprintf("UART transport create failed\n");
         vTaskDelete(NULL);
     }
-    if (_uart->uart_open(UART_BAUDRATE_921600) != 0)
+    if (mpix_transport_init(&g_uart_transport) != 0)
     {
+        xprintf("UART transport init failed\n");
         vTaskDelete(NULL);
     }
 
@@ -158,8 +151,8 @@ static void camera_task(void *pvParameters)
     ctrls.correction.color_matrix.levels[7] = -737;
     ctrls.correction.color_matrix.levels[8] = 2018;
     ctrls.correction.gamma.level = 12 << 5;
-    ctrls.ae_target = 42; // Set initial AE target to mid-level
-
+    ctrls.ae_target = 36; // Set initial AE target to mid-level
+    uint64_t last_time = mpix_port_get_uptime_us();
     while (1)
     {
         struct mpix_image image = {};
@@ -167,17 +160,18 @@ static void camera_task(void *pvParameters)
         {
             frame_counter++;
             mpix_image_stats(&image, &stats);
+            // mpix_auto_black_level(&ctrls, &stats);
             mpix_auto_white_balance(&ctrls, &stats);
             mpix_auto_exposure_control(&ctrls, &stats);
 
-            ctrls.correction.black_level.level = 16; 
-            mpix_image_correction(&image, MPIX_CORRECTION_BLACK_LEVEL, &ctrls.correction.black_level);
-            mpix_image_correction(&image, MPIX_CORRECTION_GAMMA, &ctrls.correction.gamma);
+            ctrls.correction.black_level.level = 16;
+            mpix_image_correction(&image, MPIX_CORRECTION_BLACK_LEVEL, (union mpix_correction_any *)&ctrls.correction.black_level);
+            mpix_image_correction(&image, MPIX_CORRECTION_GAMMA, (union mpix_correction_any *)&ctrls.correction.gamma);
             mpix_image_debayer(&image, 3);
-            mpix_image_correction(&image, MPIX_CORRECTION_WHITE_BALANCE, &ctrls.correction.white_balance);
-            mpix_image_correction(&image, MPIX_CORRECTION_COLOR_MATRIX, &ctrls.correction.color_matrix);
+            mpix_image_correction(&image, MPIX_CORRECTION_WHITE_BALANCE, (union mpix_correction_any *)&ctrls.correction.white_balance);
+            mpix_image_correction(&image, MPIX_CORRECTION_COLOR_MATRIX, (union mpix_correction_any *)&ctrls.correction.color_matrix);
             mpix_image_kernel(&image, MPIX_KERNEL_DENOISE, 3);
-            image.flag_print_ops = 1; // reduce log noise inside RTOS
+            //image.flag_print_ops = 1; // reduce log noise inside RTOS
             mpix_image_jpeg_encode(&image, JPEGE_Q_MED);
             mpix_image_to_buf(&image, jpeg.buffer, 128 * 1024);
             jpeg.width = image.width;
@@ -185,9 +179,16 @@ static void camera_task(void *pvParameters)
             jpeg.fourcc = MPIX_FMT_JPEG;
             jpeg.err = 0;
             jpeg.size = image.size;
-            // Transmit the encoded JPEG frame over UART
             send_image_frame(frame_counter, &jpeg);
             mpix_sensor_release_frame(sensor, &image);
+
+            // mpix_port_printf("Frame %lu: %ux%u, size=%u, err=%d, AE exp=%d, AWB R=%u B=%u, time=%dms\n",
+            //                  frame_counter, jpeg.width, jpeg.height, jpeg.size, jpeg.err,
+            //                  ctrls.exposure_level,
+            //                  ctrls.correction.white_balance.red_level,
+            //                  ctrls.correction.white_balance.blue_level,
+            //                  (int)(mpix_port_get_uptime_us() - last_time) / 1000);
+            last_time = mpix_port_get_uptime_us();
         }
         else
         {
@@ -215,7 +216,6 @@ int main(void)
     }
 
     vTaskStartScheduler();
-    // Should never reach here
     while (1)
     {
         board_delay_ms(1000);

@@ -13,8 +13,8 @@ set(LIBMPIX_ARM_HELIUM_SRC
   ${LIBMPIX_DIR}/src/arch/arm/op_debayer_helium.c
   ${LIBMPIX_DIR}/src/arch/arm/op_kernel_helium.c
   ${LIBMPIX_DIR}/src/arch/arm/op_palettize_helium.c
-  ${LIBMPIX_DIR}/src/arch/arm/JPEGENC_helium.c
-  ${LIBMPIX_DIR}/src/arch/arm/op_jpeg_helium.c
+  # ${LIBMPIX_DIR}/src/arch/arm/JPEGENC_helium.c
+  # ${LIBMPIX_DIR}/src/arch/arm/op_jpeg_helium.c
 )
 
 set(LIBMPIX_STREAM_SRC
@@ -24,6 +24,7 @@ set(LIBMPIX_STREAM_SRC
   ${LIBMPIX_STREAM_DIR}/src/sensor/mipi_csi.c
   ${LIBMPIX_STREAM_DIR}/src/sensor/datapath.c
   ${LIBMPIX_STREAM_DIR}/src/sensor.c
+  ${LIBMPIX_STREAM_DIR}/src/transport/uart.c
 )
 
 component_register(

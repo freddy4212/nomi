@@ -404,12 +404,12 @@ static ov5647_mode_t ov5647_find_mode(uint16_t width, uint16_t height)
 static uint32_t ov5647_bayer_from_orientation(bool h, bool v)
 {
     if (!h && !v)
-        return MPIX_FMT_SBGGR8; /* BGGR */
+        return MPIX_FMT_SRGGB8; /* RGGB*/
     if (h && !v)
-        return MPIX_FMT_SGBRG8; /* GBRG */
+        return MPIX_FMT_SGRBG8; /* GRBG*/
     if (!h && v)
-        return MPIX_FMT_SGRBG8; /* GRBG */
-    return MPIX_FMT_SRGGB8;     /* RGGB */
+        return MPIX_FMT_SGBRG8; /* GBRG */
+    return MPIX_FMT_SBGGR8;     /* BGGR */
 }
 
 static void ov5647_apply_orientation(struct ov5647_hw_ctx *ctx)
