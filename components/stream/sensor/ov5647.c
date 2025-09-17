@@ -24,6 +24,9 @@
 #define OV5647_MODE_STANDBY 0x00
 #define OV5647_MODE_STREAMING 0x01
 
+/* Approximate maximum coarse exposure lines (example value; adjust if precise timing known) */
+#define OV5647_EXPOSURE_MAX 0xFFFF
+
 /* OV5647 MIPI control values */
 #define OV5647_MIPI_CTRL_OFF 0x01 /* MIPI OFF */
 #define OV5647_MIPI_CTRL_ON 0x14  /* MIPI ON */
@@ -379,14 +382,85 @@ static int ov5647_write_regs(uint8_t addr, const struct ov5647_reg *regs)
 
 static ov5647_mode_t ov5647_find_mode(uint16_t width, uint16_t height)
 {
+    int best = -1;
+    uint32_t best_score = UINT32_MAX;
     for (int i = 0; i < OV5647_MODE_MAX; i++)
     {
-        if (ov5647_modes[i].width == width && ov5647_modes[i].height == height)
+        uint32_t dw = (ov5647_modes[i].width > width) ? (ov5647_modes[i].width - width) : (width - ov5647_modes[i].width);
+        uint32_t dh = (ov5647_modes[i].height > height) ? (ov5647_modes[i].height - height) : (height - ov5647_modes[i].height);
+        uint32_t score = (dw << 16) | dh; /* width diff priority */
+        if (score < best_score)
         {
-            return i;
+            best_score = score;
+            best = i;
+            if (dw == 0 && dh == 0)
+                break;
         }
     }
-    return OV5647_MODE_MAX; /* Not found */
+    return best >= 0 ? (ov5647_mode_t)best : OV5647_MODE_MAX;
+}
+
+/* Orientation + Bayer mapping (native BGGR) similar to IMX219 */
+static uint32_t ov5647_bayer_from_orientation(bool h, bool v)
+{
+    if (!h && !v)
+        return MPIX_FMT_SBGGR8; /* BGGR */
+    if (h && !v)
+        return MPIX_FMT_SGBRG8; /* GBRG */
+    if (!h && v)
+        return MPIX_FMT_SGRBG8; /* GRBG */
+    return MPIX_FMT_SRGGB8;     /* RGGB */
+}
+
+static void ov5647_apply_orientation(struct ov5647_hw_ctx *ctx)
+{
+    /* OV5647 uses 0x3820 (V) and 0x3821 (H) bits for mirror/flip.
+     * Typical: bit2 of 0x3821 = H mirror, bit2 of 0x3820 = V flip, plus fixed pattern bits.
+     * Current hard-coded init used 0x3821=0x07, 0x3820=0x41 (varies by script). We'll preserve upper bits and toggle bit2.
+     */
+    uint8_t vreg, hreg;
+    if (ov5647_read_reg(ctx->i2c_addr, 0x3820, &vreg) < 0)
+        return;
+    if (ov5647_read_reg(ctx->i2c_addr, 0x3821, &hreg) < 0)
+        return;
+    if (ctx->v_flip)
+        vreg |= (1u << 2);
+    else
+        vreg &= ~(1u << 2);
+    if (ctx->h_mirror)
+        hreg |= (1u << 2);
+    else
+        hreg &= ~(1u << 2);
+    ov5647_write_reg(ctx->i2c_addr, 0x3820, vreg);
+    ov5647_write_reg(ctx->i2c_addr, 0x3821, hreg);
+    ctx->current_format.fourcc = ov5647_bayer_from_orientation(ctx->h_mirror, ctx->v_flip);
+}
+
+static void ov5647_apply_test_pattern(struct ov5647_hw_ctx *ctx)
+{
+    /* OV5647 test pattern register 0x503D:
+     * 0x00: disable
+     * 0x80: color bar
+     * 0x81: color bar (alternate) – treat as 2
+     */
+    uint8_t val;
+    switch (ctx->test_pattern)
+    {
+    case 0:
+        val = 0x00;
+        break;
+    case 1:
+        val = 0x80;
+        break;
+    case 2:
+        val = 0x81;
+        break;
+    default:
+        val = 0x00;
+        ctx->test_pattern = 0;
+        break;
+    }
+    ov5647_write_reg(ctx->i2c_addr, 0x503D, val);
 }
 
 /* Sensor operations implementation */
@@ -410,15 +484,19 @@ static int ov5647_init(const struct mpix_sensor *sensor)
     ctx->current_mode = OV5647_MODE_640x480_30FPS;
 
     /* Initialize controls to default values */
-    ctx->brightness = 0;
-    ctx->contrast = 0;
-    ctx->saturation = 0;
     ctx->h_mirror = false;
     ctx->v_flip = false;
     ctx->exposure = 1;      /* auto exposure enabled */
     ctx->white_balance = 1; /* auto white balance enabled */
     ctx->test_pattern = 0;
 
+    /* Default orientation: enable both flips for consistency with IMX219 request (0x03 style)
+     * If you want both enabled by default, set flags and apply.
+     */
+    ctx->h_mirror = true;
+    ctx->v_flip = true;
+    ctx->current_format.fourcc = ov5647_bayer_from_orientation(ctx->h_mirror, ctx->v_flip);
+    ov5647_apply_orientation(ctx);
     ctx->initialized = true;
 
     return 0;
@@ -504,11 +582,6 @@ static int ov5647_set_format(const struct mpix_sensor *sensor,
         return -EINVAL;
     }
 
-    // if (format->fourcc != MPIX_FMT_SBGGR8)
-    // {
-    //     return -ENOTSUP;
-    // }
-
     /* Find matching mode */
     mode = ov5647_find_mode(format->width, format->height);
     if (mode >= OV5647_MODE_MAX)
@@ -542,6 +615,8 @@ static int ov5647_set_format(const struct mpix_sensor *sensor,
     /* Update context */
     ctx->current_mode = mode;
     ctx->current_format = *format;
+    /* Re-apply orientation to keep fourcc in sync */
+    ov5647_apply_orientation(ctx);
 
     const mipi_csi_config_t csi_config = {
         .clock_freq_mhz = 350,
@@ -580,44 +655,30 @@ static int ov5647_set_ctrl(const struct mpix_sensor *sensor, uint32_t cid, const
 
     switch (cid)
     {
-    case MPIX_SENSOR_BRIGHTNESS:
-        ctx->brightness = val;
-        /* TODO: Apply brightness register settings */
-        break;
 
-    case MPIX_SENSOR_CONTRAST:
-        ctx->contrast = val;
-        /* TODO: Apply contrast register settings */
-        break;
-
-    case MPIX_SENSOR_SATURATION:
-        ctx->saturation = val;
-        /* TODO: Apply saturation register settings */
-        break;
-
-    case MPIX_SENSOR_HMIRROR:
+    case V4L2_CID_HFLIP:
         ctx->h_mirror = (val != 0);
-        /* TODO: Apply horizontal mirror register settings */
+        ov5647_apply_orientation(ctx);
         break;
 
-    case MPIX_SENSOR_VFLIP:
+    case V4L2_CID_VFLIP:
         ctx->v_flip = (val != 0);
-        /* TODO: Apply vertical flip register settings */
+        ov5647_apply_orientation(ctx);
         break;
 
-    case MPIX_SENSOR_EXPOSURE:
+    case V4L2_CID_EXPOSURE_ABSOLUTE:
         ctx->exposure = val;
         /* TODO: Apply exposure register settings */
         break;
 
-    case MPIX_SENSOR_AWB:
+    case V4L2_CID_AUTO_WHITE_BALANCE:
         ctx->white_balance = val;
         /* TODO: Apply white balance register settings */
         break;
 
-    case MPIX_SENSOR_TEST_PATTERN:
+    case V4L2_CID_TEST_PATTERN:
         ctx->test_pattern = val;
-        /* TODO: Apply test pattern register settings */
+        ov5647_apply_test_pattern(ctx);
         break;
 
     default:
@@ -639,36 +700,27 @@ static int ov5647_get_ctrl(const struct mpix_sensor *sensor, uint32_t cid, void 
 
     switch (cid)
     {
-    case MPIX_SENSOR_BRIGHTNESS:
-        *val = ctx->brightness;
-        break;
-
-    case MPIX_SENSOR_CONTRAST:
-        *val = ctx->contrast;
-        break;
-
-    case MPIX_SENSOR_SATURATION:
-        *val = ctx->saturation;
-        break;
-
-    case MPIX_SENSOR_HMIRROR:
+    case V4L2_CID_HFLIP:
         *val = ctx->h_mirror ? 1 : 0;
         break;
 
-    case MPIX_SENSOR_VFLIP:
+    case V4L2_CID_VFLIP:
         *val = ctx->v_flip ? 1 : 0;
         break;
 
-    case MPIX_SENSOR_EXPOSURE:
+    case V4L2_CID_EXPOSURE_ABSOLUTE:
         *val = ctx->exposure;
         break;
 
-    case MPIX_SENSOR_AWB:
+    case V4L2_CID_AUTO_WHITE_BALANCE:
         *val = ctx->white_balance;
         break;
 
-    case MPIX_SENSOR_TEST_PATTERN:
+    case V4L2_CID_TEST_PATTERN:
         *val = ctx->test_pattern;
+        break;
+    case MPIX_CID_EXPOSURE_MAX:
+        *val = OV5647_EXPOSURE_MAX;
         break;
 
     default:
@@ -771,12 +823,6 @@ static int ov5647_get_frame(struct mpix_sensor *sensor, struct mpix_image *image
         return -EAGAIN;
     }
 
-    /* TODO: Implement frame capture from hardware
-     * This would typically:
-     * 1. Wait for frame ready interrupt/signal
-     * 2. Copy frame data from hardware buffer to image buffer
-     * 3. Update image metadata
-     */
     while (!datapath_is_frame_ready())
     {
         /* Wait */

@@ -39,9 +39,6 @@ struct imx219_hw_ctx {
     struct mpix_sensor_format current_format;
     
     /* Control values */
-    int brightness;      /* -2 to +2 */
-    int contrast;        /* -2 to +2 */
-    int saturation;      /* -2 to +2 */
     bool h_mirror;       /* horizontal mirror */
     bool v_flip;         /* vertical flip */
     int exposure;        /* auto exposure control */

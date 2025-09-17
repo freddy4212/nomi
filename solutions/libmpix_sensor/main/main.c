@@ -15,6 +15,9 @@
 #include <mpix/op_resize.h>
 #include <mpix/op_palettize.h>
 #include <mpix/port.h>
+#include "FreeRTOS.h"
+#include "task.h"
+
 /* Simple image transfer protocol */
 #define FRAME_HEADER 0xAA55AA55
 #define FRAME_FOOTER 0x55AA55AA
@@ -105,103 +108,116 @@ static void send_image_frame(uint32_t frame_id, const struct mpix_image *image)
         ;
 }
 
-int main(void)
-{
-    static uint32_t frame_counter = 0;
+/* Task configuration */
+#define CAMERA_TASK_STACK_SIZE (8192)
+#define CAMERA_TASK_PRIORITY (tskIDLE_PRIORITY + 2)
 
-    board_init();
+static void camera_task(void *pvParameters)
+{
+    (void)pvParameters;
+    static uint32_t frame_counter = 0;
 
     _uart = hx_drv_uart_get_dev(USE_DW_UART_0);
     if (_uart == NULL)
     {
-        return 0;
+        vTaskDelete(NULL);
     }
-
-    int ret = _uart->uart_open(UART_BAUDRATE_921600);
-    if (ret != 0)
+    if (_uart->uart_open(UART_BAUDRATE_921600) != 0)
     {
-        return 0;
+        vTaskDelete(NULL);
     }
 
     struct mpix_sensor *sensor = sensor_probe();
     if (!sensor)
     {
         xprintf("No camera sensor found!\n");
-        while (1)
-        {
-            board_delay_ms(1000);
-        }
+        vTaskDelete(NULL);
     }
     else
     {
         xprintf("Camera sensor found: %s\n", mpix_sensor_get_name(sensor));
     }
 
-    mpix_sensor_set_format(sensor, &(struct mpix_sensor_format){
-                                       .width = 1280,
-                                       .height = 960,
-                                   });
+    mpix_sensor_set_format(sensor, &(struct mpix_sensor_format){.width = 640, .height = 480});
     mpix_sensor_start_stream(sensor);
-    xprintf("Starting image transmission...\n");
-    board_delay_ms(1000); /* Give time for startup message */
+    xprintf("Starting image transmission (task) ...\n");
+
     struct mpix_image jpeg = {};
     struct mpix_stats stats = {};
     struct mpix_auto_ctrls ctrls = {};
     jpeg.buffer = mpix_port_alloc(128 * 1024);
     jpeg.size = 128 * 1024;
+    mpix_auto_exposure_init(&ctrls, sensor);
+    ctrls.correction.color_matrix.levels[0] = 2235; // 4650K matrix
+    ctrls.correction.color_matrix.levels[1] = -726;
+    ctrls.correction.color_matrix.levels[2] = -484;
+    ctrls.correction.color_matrix.levels[3] = -719;
+    ctrls.correction.color_matrix.levels[4] = 2830;
+    ctrls.correction.color_matrix.levels[5] = -1088;
+    ctrls.correction.color_matrix.levels[6] = -257;
+    ctrls.correction.color_matrix.levels[7] = -737;
+    ctrls.correction.color_matrix.levels[8] = 2018;
+    ctrls.correction.gamma.level = 12 << 5;
+    ctrls.ae_target = 42; // Set initial AE target to mid-level
+
     while (1)
     {
         struct mpix_image image = {};
-
         if (mpix_sensor_get_frame(sensor, &image, 1000) == 0)
         {
             frame_counter++;
-            // mpix_stats_print(&stats);
-
             mpix_image_stats(&image, &stats);
-
-            mpix_auto_black_level(&ctrls, &stats);
             mpix_auto_white_balance(&ctrls, &stats);
+            mpix_auto_exposure_control(&ctrls, &stats);
 
-            /* Convert from raw bayer to RGB24 */
+            ctrls.correction.black_level.level = 16; 
+            mpix_image_correction(&image, MPIX_CORRECTION_BLACK_LEVEL, &ctrls.correction.black_level);
+            mpix_image_correction(&image, MPIX_CORRECTION_GAMMA, &ctrls.correction.gamma);
             mpix_image_debayer(&image, 3);
-
-            // mpix_stats_print(&stats);
-
-            /* Apply all the color correction to the palette only */
-            // mpix_image_correction(&image, MPIX_CORRECTION_BLACK_LEVEL, &ctrls.correction.black_level);
             mpix_image_correction(&image, MPIX_CORRECTION_WHITE_BALANCE, &ctrls.correction.white_balance);
-            // mpix_image_correction(&image, MPIX_CORRECTION_GAMMA, &ctrls.correction.gamma);
-
-            // mpix_image_kernel(&image, MPIX_KERNEL_DENOISE, 3);
-            // mpix_image_kernel(&image, MPIX_KERNEL_SHARPEN, 3);
-
+            mpix_image_correction(&image, MPIX_CORRECTION_COLOR_MATRIX, &ctrls.correction.color_matrix);
+            mpix_image_kernel(&image, MPIX_KERNEL_DENOISE, 3);
+            image.flag_print_ops = 1; // reduce log noise inside RTOS
             mpix_image_jpeg_encode(&image, JPEGE_Q_MED);
-
             mpix_image_to_buf(&image, jpeg.buffer, 128 * 1024);
             jpeg.width = image.width;
             jpeg.height = image.height;
             jpeg.fourcc = MPIX_FMT_JPEG;
             jpeg.err = 0;
             jpeg.size = image.size;
-
-            /* Send debug info as text first */
-            xprintf("FRAME_START:%d,%d,%d,%d\n",
-                    frame_counter, image.width, image.height, image.size);
-
-            /* Send binary image data */
+            // Transmit the encoded JPEG frame over UART
             send_image_frame(frame_counter, &jpeg);
-
-            /* Send debug info as text after */
-            xprintf("FRAME_END\n", frame_counter);
-
             mpix_sensor_release_frame(sensor, &image);
         }
         else
         {
-            xprintf("Failed to get frame\n");
-            board_delay_ms(500);
+            xprintf("Frame timeout\n");
+            vTaskDelay(pdMS_TO_TICKS(200));
+        }
+        taskYIELD();
+    }
+}
+
+// Replace original main loop with RTOS startup
+int main(void)
+{
+    board_init();
+    xprintf("\n[BOOT] Starting camera FreeRTOS task...\n");
+
+    BaseType_t res = xTaskCreate(camera_task, "CameraTask", CAMERA_TASK_STACK_SIZE, NULL, CAMERA_TASK_PRIORITY, NULL);
+    if (res != pdPASS)
+    {
+        xprintf("Failed to create CameraTask\n");
+        while (1)
+        {
+            board_delay_ms(1000);
         }
     }
-    return 0;
+
+    vTaskStartScheduler();
+    // Should never reach here
+    while (1)
+    {
+        board_delay_ms(1000);
+    }
 }

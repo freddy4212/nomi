@@ -25,6 +25,24 @@
 #define IMX219_MODE_STANDBY 0x00
 #define IMX219_MODE_STREAMING 0x01
 
+/* IMX219 Exposure settings */
+#define IMX219_EXPOSURE_REG 0x015A
+#define IMX219_EXPOSURE_MIN 4
+#define IMX219_EXPOSURE_MAX 60000
+#define IMX219_EXPOSURE_DEFAULT 0x1000
+
+/* IMX219 Analog Gain settings */
+#define IMX219_ANALOG_GAIN_REG 0x0157
+#define IMX219_ANALOG_GAIN_MIN 0
+#define IMX219_ANALOG_GAIN_MAX 232
+#define IMX219_ANALOG_GAIN_DEFAULT 0
+
+/* IMX219 Digital Gain settings */
+#define IMX219_DIGITAL_GAIN_REG 0x0158
+#define IMX219_DIGITAL_GAIN_MIN 0x0100
+#define IMX219_DIGITAL_GAIN_MAX 0x0FFF
+#define IMX219_DIGITAL_GAIN_DEFAULT 0x0100
+
 /* Resolution configuration tables */
 struct imx219_reg
 {
@@ -41,7 +59,7 @@ static const struct imx219_reg imx219_640x480_regs[] = {
     {0x0128, 0x00}, /* DPHY_CTRL */
     {0x012A, 0x18}, /* EXCK_FREQ_MSB */
     {0x012B, 0x00}, /* EXCK_FREQ_LSB */
-    /* Image orientation */
+    /* Image orientation: default enable H+V (0x03) */
     {0x0172, 0x03}, /* IMG_ORIENTATION */
     /* Binning configuration */
     {0x0157, 0x00}, /* ANALOG_GAIN_GLOBAL */
@@ -96,53 +114,25 @@ static const struct imx219_reg imx219_640x480_regs[] = {
     {0x4797, 0x0E}, /* CIS_TUNING_106 */
     {0x479B, 0x0E}, /* CIS_TUNING_107 */
     /* Initial exposure and gain settings for proper brightness */
-    {0x0157, 0x80}, /* ANALOG_GAIN_GLOBAL - moderate gain */
-    {0x015A, 0x20}, /* COARSE_INTEGRATION_TIME_MSB */
-    {0x015B, 0x00}, /* COARSE_INTEGRATION_TIME_LSB */
-    {0xFFFF, 0xFF}  /* End marker */
+    {0x0157, IMX219_ANALOG_GAIN_DEFAULT},            /* ANALOG_GAIN_GLOBAL - moderate gain */
+    {0x0158, IMX219_DIGITAL_GAIN_DEFAULT >> 8},      /* DIGITAL_GAIN_MSB */
+    {0x0159, IMX219_DIGITAL_GAIN_DEFAULT & 0xFF},    /* DIGITAL_GAIN_LSB */
+    {0x015A, (IMX219_EXPOSURE_DEFAULT >> 8) & 0xFF}, /* COARSE_INTEGRATION_TIME_MSB */
+    {0x015B, IMX219_EXPOSURE_DEFAULT & 0xFF},        /* COARSE_INTEGRATION_TIME_LSB */
+    {0xFFFF, 0xFF}                                   /* End marker */
 };
 
 /* 1280x960 30fps configuration - based on working 3280x2464 config */
 static const struct imx219_reg imx219_1280x960_regs[] = {
     /* Stream off */
     {0x0100, 0x00},
-
-    /* To Access Addresses 3000-5fff, send the following commands */
-    {0x30EB, 0x0C},
-    {0x30EB, 0x05},
-    {0x300A, 0xFF},
-    {0x300B, 0xFF},
-    {0x30EB, 0x05},
-    {0x30EB, 0x09},
-
-    /* Image orientation */
+    /* Clock settings */
+    {0x0114, 0x01}, /* CSI_LANE_MODE */
+    {0x0128, 0x00}, /* DPHY_CTRL */
+    {0x012A, 0x18}, /* EXCK_FREQ_MSB */
+    {0x012B, 0x00}, /* EXCK_FREQ_LSB */
+    /* Image orientation: default enable H+V (0x03) */
     {0x0172, 0x03}, /* IMG_ORIENTATION */
-
-    /* PLL Clock Table */
-    {0x0301, 0x05}, /* VTPXCK_DIV */
-    {0x0303, 0x01}, /* VTSYSCK_DIV */
-    {0x0304, 0x03}, /* PREPLLCK_VT_DIV */
-    {0x0305, 0x03}, /* PREPLLCK_OP_DIV */
-    {0x0306, 0x00}, /* PLL_VT_MPY */
-    {0x0307, 0x39},
-    {0x030B, 0x01}, /* OP_SYS_CLK_DIV */
-    {0x030C, 0x00}, /* PLL_OP_MPY */
-    {0x030D, 0x72},
-
-    /* Undocumented registers */
-    {0x455E, 0x00},
-    {0x471E, 0x4B},
-    {0x4767, 0x0F},
-    {0x4750, 0x14},
-    {0x4540, 0x00},
-    {0x47B4, 0x14},
-    {0x4713, 0x30},
-    {0x478B, 0x10},
-    {0x478F, 0x10},
-    {0x4793, 0x10},
-    {0x4797, 0x0E},
-    {0x479B, 0x0E},
-
     /* Frame Bank Register Group "A" */
     {0x0160, 0x05}, /* FRM_LENGTH_A_MSB - frame length for 30fps */
     {0x0161, 0x28}, /* FRM_LENGTH_A_LSB - frame length 1320 */
@@ -150,13 +140,6 @@ static const struct imx219_reg imx219_1280x960_regs[] = {
     {0x0163, 0x78},
     {0x0170, 0x03}, /* X_ODD_INC_A - 2x2 binning (3 = skip 1 pixel) */
     {0x0171, 0x03}, /* Y_ODD_INC_A - 2x2 binning (3 = skip 1 line) */
-
-    /* Output setup registers */
-    {0x0114, 0x01}, /* CSI 2-Lane Mode */
-    {0x0128, 0x00}, /* DPHY Auto Mode */
-    {0x012A, 0x18}, /* EXCK_Freq */
-    {0x012B, 0x00},
-
     /* Crop and output settings for 2560x1920 -> 1280x960 with 2x2 binning */
     {0x0164, 0x01}, /* X_ADD_STA_A MSB - start X = 360 (center crop) */
     {0x0165, 0x68}, /* X_ADD_STA_A LSB */
@@ -174,11 +157,9 @@ static const struct imx219_reg imx219_1280x960_regs[] = {
     {0x0625, 0x00}, /* Output width LSB */
     {0x0626, 0x03}, /* Output height MSB */
     {0x0627, 0xC0}, /* Output height LSB */
-
     /* RAW10 format */
     {0x018C, 0x0A}, /* CSI_DATA_FORMAT_A MSB */
     {0x018D, 0x0A}, /* CSI_DATA_FORMAT_A LSB */
-
     /* PLL settings */
     {0x0301, 0x05}, /* VTPXCK_DIV */
     {0x0303, 0x01}, /* VTSYCK_DIV */
@@ -204,10 +185,13 @@ static const struct imx219_reg imx219_1280x960_regs[] = {
     {0x4797, 0x0E}, /* CIS_TUNING_106 */
     {0x479B, 0x0E}, /* CIS_TUNING_107 */
     /* Initial exposure and gain settings for proper brightness */
-    {0x0157, 0x80}, /* ANALOG_GAIN_GLOBAL - moderate gain */
-    {0x015A, 0x0D}, /* COARSE_INTEGRATION_TIME_MSB */
-    {0x015B, 0x00}, /* COARSE_INTEGRATION_TIME_LSB */
-    {0xFFFF, 0xFF}  /* End marker */
+    {0x0157, IMX219_ANALOG_GAIN_DEFAULT},            /* ANALOG_GAIN_GLOBAL - moderate gain */
+    {0x0158, IMX219_DIGITAL_GAIN_DEFAULT >> 8},      /* DIGITAL_GAIN_MSB */
+    {0x0159, IMX219_DIGITAL_GAIN_DEFAULT & 0xFF},    /* DIGITAL_GAIN_LSB */
+    {0x015A, (IMX219_EXPOSURE_DEFAULT >> 8) & 0xFF}, /* COARSE_INTEGRATION_TIME_MSB */
+    {0x015B, IMX219_EXPOSURE_DEFAULT & 0xFF},        /* COARSE_INTEGRATION_TIME_LSB */
+    {0xFFFF, 0xFF}                                   /* End marker */
+
 };
 
 /* Mode configuration table */
@@ -224,14 +208,14 @@ static const struct
         .width = 640,
         .height = 480,
         .fps = 30,
-        .fourcc = MPIX_FMT_SBGGR8,
+        .fourcc = MPIX_FMT_BGGR8,
     },
     [IMX219_MODE_1280x960_30FPS] = {
         .regs = imx219_1280x960_regs,
         .width = 1280,
         .height = 960,
         .fps = 30,
-        .fourcc = MPIX_FMT_SBGGR8,
+        .fourcc = MPIX_FMT_BGGR8,
     },
 };
 
@@ -272,16 +256,85 @@ static int imx219_write_regs(uint8_t addr, const struct imx219_reg *regs)
     return 0;
 }
 
+/* Map orientation (h_mirror, v_flip) to Bayer pattern.
+ * Original sensor native ordering assumed BGGR.
+ * Orientation register bits (0x0172): bit0 = H mirror, bit1 = V flip.
+ * Pattern transform table from BGGR:
+ *  H=0,V=0 -> BGGR (BGGR)
+ *  H=1,V=0 -> GBRG (swap columns)
+ *  H=0,V=1 -> GRBG (swap rows)
+ *  H=1,V=1 -> RGGB (swap both)
+ */
+static uint32_t imx219_bayer_from_orientation(bool h, bool v)
+{
+    if (!h && !v)
+        return MPIX_FMT_SRGGB8;
+    if (h && !v)
+        return MPIX_FMT_SGRBG8; /* GRBG */
+    if (!h && v)
+        return MPIX_FMT_SGBRG8; /* GBRG */
+    return MPIX_FMT_SBGGR8;     /* RGGB */
+}
+
+static void imx219_apply_orientation(struct imx219_hw_ctx *ctx)
+{
+    uint8_t orient = 0;
+    if (ctx->h_mirror)
+        orient |= 0x01;
+    if (ctx->v_flip)
+        orient |= 0x02;
+    imx219_write_reg(ctx->i2c_addr, 0x0172, orient);
+    /* Update current format fourcc so downstream debayer picks correct mosaic */
+    ctx->current_format.fourcc = imx219_bayer_from_orientation(ctx->h_mirror, ctx->v_flip);
+}
+
+static void imx219_apply_test_pattern(struct imx219_hw_ctx *ctx)
+{
+    /* IMX219 test pattern registers (commonly 0x0600 enable, 0x0601 pattern select)
+     * Here we implement a simple mapping:
+     * 0: disabled
+     * 1: solid color bar
+     * 2: color bars
+     * Additional patterns can be added as needed.
+     */
+    switch (ctx->test_pattern)
+    {
+    case 0: /* disable */
+        imx219_write_reg(ctx->i2c_addr, 0x0600, 0x00);
+        break;
+    case 1: /* solid color (use default) */
+        imx219_write_reg(ctx->i2c_addr, 0x0600, 0x01);
+        imx219_write_reg(ctx->i2c_addr, 0x0601, 0x00);
+        break;
+    case 2: /* color bars */
+        imx219_write_reg(ctx->i2c_addr, 0x0600, 0x01);
+        imx219_write_reg(ctx->i2c_addr, 0x0601, 0x01);
+        break;
+    default: /* unsupported pattern id -> disable */
+        imx219_write_reg(ctx->i2c_addr, 0x0600, 0x00);
+        ctx->test_pattern = 0;
+        break;
+    }
+}
+
 static imx219_mode_t imx219_find_mode(uint16_t width, uint16_t height)
 {
+    int best_idx = -1;
+    uint32_t best_score = UINT32_MAX;
     for (int i = 0; i < IMX219_MODE_MAX; i++)
     {
-        if (imx219_modes[i].width == width && imx219_modes[i].height == height)
+        uint32_t dw = (imx219_modes[i].width > width) ? (imx219_modes[i].width - width) : (width - imx219_modes[i].width);
+        uint32_t dh = (imx219_modes[i].height > height) ? (imx219_modes[i].height - height) : (height - imx219_modes[i].height);
+        uint32_t score = (dw << 16) | (dh & 0xFFFF); /* prioritize width diff then height diff */
+        if (score < best_score)
         {
-            return i;
+            best_score = score;
+            best_idx = i;
+            if (dw == 0 && dh == 0)
+                break; /* exact match */
         }
     }
-    return IMX219_MODE_MAX; /* Not found */
+    return best_idx >= 0 ? (imx219_mode_t)best_idx : IMX219_MODE_MAX;
 }
 
 /* Sensor operations implementation */
@@ -305,15 +358,14 @@ static int imx219_init(const struct mpix_sensor *sensor)
     ctx->current_mode = IMX219_MODE_640x480_30FPS;
 
     /* Initialize controls to default values */
-    ctx->brightness = 0;
-    ctx->contrast = 0;
-    ctx->saturation = 0;
-    ctx->h_mirror = false;
-    ctx->v_flip = false;
+    ctx->h_mirror = true; /* default orientation register = 0x03 */
+    ctx->v_flip = true;
     ctx->exposure = 0x0100; /* Default exposure time for IMX219 */
     ctx->white_balance = 1; /* auto white balance enabled */
     ctx->test_pattern = 0;
 
+    /* Ensure fourcc reflects default orientation */
+    ctx->current_format.fourcc = imx219_bayer_from_orientation(ctx->h_mirror, ctx->v_flip);
     ctx->initialized = true;
 
     return 0;
@@ -399,11 +451,6 @@ static int imx219_set_format(const struct mpix_sensor *sensor,
         return -EINVAL;
     }
 
-    // if (format->fourcc != MPIX_FMT_SRGGB8)
-    // {
-    //     return -ENOTSUP;
-    // }
-
     /* Find matching mode */
     mode = imx219_find_mode(format->width, format->height);
 
@@ -437,7 +484,7 @@ static int imx219_set_format(const struct mpix_sensor *sensor,
     const mipi_csi_config_t csi_config = {
         .clock_freq_mhz = 456, /* IMX219 MIPI clock frequency */
         .lane_count = MIPI_CSI_LANE_2,
-        .pixel_depth = MIPI_CSI_PIXEL_DEPTH_10,
+        .pixel_depth = MIPI_CSI_PIXEL_DEPTH_8,
         .clock_mode = MIPI_CSI_CLK_MODE_CONTINUOUS,
         .deskew_enable = false};
     mipi_csi_configure(&csi_config);
@@ -447,7 +494,7 @@ static int imx219_set_format(const struct mpix_sensor *sensor,
     const datapath_config_t dp_config = {
         .width = format->width,
         .height = format->height,
-        .pixel_depth = 10, /* IMX219 outputs 10-bit */
+        .pixel_depth = 8, /* IMX219 outputs 10-bit */
         .enable_crop = false,
         .crop_x = 0,
         .crop_y = 0,
@@ -458,6 +505,8 @@ static int imx219_set_format(const struct mpix_sensor *sensor,
     /* Update context */
     ctx->current_mode = mode;
     ctx->current_format = *format;
+    /* Re-apply orientation to update mosaic fourcc if needed */
+    imx219_apply_orientation(ctx);
 
     return 0;
 }
@@ -476,32 +525,44 @@ static int imx219_set_ctrl(const struct mpix_sensor *sensor, uint32_t cid, const
 
     switch (cid)
     {
-    case MPIX_SENSOR_BRIGHTNESS:
-        ctx->brightness = val;
-        /* TODO: Apply brightness register settings */
-        break;
-
-    case MPIX_SENSOR_CONTRAST:
-        ctx->contrast = val;
-        /* TODO: Apply contrast register settings */
-        break;
-
-    case MPIX_SENSOR_SATURATION:
-        ctx->saturation = val;
-        /* TODO: Apply saturation register settings */
-        break;
-
-    case MPIX_SENSOR_HMIRROR:
+    case V4L2_CID_HFLIP:
         ctx->h_mirror = (val != 0);
-        /* TODO: Apply horizontal mirror register settings */
+        imx219_apply_orientation(ctx);
         break;
 
-    case MPIX_SENSOR_VFLIP:
+    case V4L2_CID_VFLIP:
         ctx->v_flip = (val != 0);
-        /* TODO: Apply vertical flip register settings */
+        imx219_apply_orientation(ctx);
+        break;
+    case V4L2_CID_TEST_PATTERN:
+        ctx->test_pattern = val;
+        imx219_apply_test_pattern(ctx);
+        break;
+    case V4L2_CID_ANALOGUE_GAIN:
+        /* Apply analog gain */
+        if (val >= IMX219_ANALOG_GAIN_MIN && val <= IMX219_ANALOG_GAIN_MAX)
+        {
+            imx219_write_reg(ctx->i2c_addr, IMX219_ANALOG_GAIN_REG, (uint8_t)val);
+        }
+        else
+        {
+            return -EINVAL; /* Invalid analog gain value */
+        }
+        break;
+    case V4L2_CID_DIGITAL_GAIN:
+        /* Apply digital gain */
+        if (val >= IMX219_DIGITAL_GAIN_MIN && val <= IMX219_DIGITAL_GAIN_MAX)
+        {
+            imx219_write_reg(ctx->i2c_addr, IMX219_DIGITAL_GAIN_REG, (uint8_t)(val >> 8));       /* MSB */
+            imx219_write_reg(ctx->i2c_addr, IMX219_DIGITAL_GAIN_REG + 1, (uint8_t)(val & 0xFF)); /* LSB */
+        }
+        else
+        {
+            return -EINVAL; /* Invalid digital gain value */
+        }
         break;
 
-    case MPIX_SENSOR_EXPOSURE:
+    case V4L2_CID_EXPOSURE_ABSOLUTE:
         ctx->exposure = val;
         /* Apply exposure time (coarse integration time) */
         if (val > 0)
@@ -510,16 +571,6 @@ static int imx219_set_ctrl(const struct mpix_sensor *sensor, uint32_t cid, const
             imx219_write_reg(ctx->i2c_addr, 0x015A, (exp_time >> 8) & 0xFF); /* MSB */
             imx219_write_reg(ctx->i2c_addr, 0x015B, exp_time & 0xFF);        /* LSB */
         }
-        break;
-
-    case MPIX_SENSOR_AWB:
-        ctx->white_balance = val;
-        /* TODO: Apply white balance register settings */
-        break;
-
-    case MPIX_SENSOR_TEST_PATTERN:
-        ctx->test_pattern = val;
-        /* TODO: Apply test pattern register settings */
         break;
 
     default:
@@ -541,36 +592,44 @@ static int imx219_get_ctrl(const struct mpix_sensor *sensor, uint32_t cid, void 
 
     switch (cid)
     {
-    case MPIX_SENSOR_BRIGHTNESS:
-        *val = ctx->brightness;
-        break;
-
-    case MPIX_SENSOR_CONTRAST:
-        *val = ctx->contrast;
-        break;
-
-    case MPIX_SENSOR_SATURATION:
-        *val = ctx->saturation;
-        break;
-
-    case MPIX_SENSOR_HMIRROR:
+    case V4L2_CID_HFLIP:
         *val = ctx->h_mirror ? 1 : 0;
         break;
 
-    case MPIX_SENSOR_VFLIP:
+    case V4L2_CID_VFLIP:
         *val = ctx->v_flip ? 1 : 0;
         break;
-
-    case MPIX_SENSOR_EXPOSURE:
-        *val = ctx->exposure;
+    case V4L2_CID_ANALOGUE_GAIN:
+        /* Read analog gain */
+        imx219_read_reg(ctx->i2c_addr, IMX219_ANALOG_GAIN_REG, (uint8_t *)val);
         break;
-
-    case MPIX_SENSOR_AWB:
+    case V4L2_CID_DIGITAL_GAIN:
+        /* Read digital gain */
+        {
+            uint8_t msb, lsb;
+            imx219_read_reg(ctx->i2c_addr, IMX219_DIGITAL_GAIN_REG, &msb);
+            imx219_read_reg(ctx->i2c_addr, IMX219_DIGITAL_GAIN_REG + 1, &lsb);
+            *val = (msb << 8) | lsb;
+        }
+        break;
+    case V4L2_CID_EXPOSURE_ABSOLUTE:
+        /* Read exposure time (coarse integration time) */
+        {
+            uint8_t msb, lsb;
+            imx219_read_reg(ctx->i2c_addr, 0x015A, &msb);
+            imx219_read_reg(ctx->i2c_addr, 0x015B, &lsb);
+            *val = (msb << 8) | lsb;
+        }
+        break;
+    case V4L2_CID_AUTO_WHITE_BALANCE:
         *val = ctx->white_balance;
         break;
 
-    case MPIX_SENSOR_TEST_PATTERN:
+    case V4L2_CID_TEST_PATTERN:
         *val = ctx->test_pattern;
+        break;
+    case MPIX_CID_EXPOSURE_MAX:
+        *val = IMX219_EXPOSURE_MAX;
         break;
 
     default:
@@ -670,7 +729,7 @@ static int imx219_get_frame(struct mpix_sensor *sensor, struct mpix_image *image
 
     image->width = ctx->current_format.width;
     image->height = ctx->current_format.height;
-    image->fourcc = MPIX_FMT_SBGGR8; 
+    image->fourcc = ctx->current_format.fourcc ? ctx->current_format.fourcc : MPIX_FMT_BGGR8;
     image->buffer = (uint8_t *)datapath_acquire_raw_buffer();
     image->size = image->width * image->height;
 
