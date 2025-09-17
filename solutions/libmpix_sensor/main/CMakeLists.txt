@@ -1,5 +1,5 @@
 component_register(
     COMPONENT_NAME main
     SRCS ${CMAKE_CURRENT_LIST_DIR}/main.c
-    REQUIREDS freertos libmpix stream
+    REQUIREDS freertos libmpix
 )
