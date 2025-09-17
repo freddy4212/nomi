@@ -8,6 +8,7 @@
 #include "WE2_device.h"
 #include "xprintf.h"
 #include <mpix/port.h>
+#include <mpix/sensor.h>
 
 #ifdef FREERTOS
 #include <FreeRTOS.h>
@@ -18,8 +19,8 @@
 
 #ifndef FREERTOS
 /* Static memory pool configuration - only used when FreeRTOS is not available */
-#define MPIX_MEMORY_POOL_SIZE (1024 * 1024) /* 512KB memory pool */
-#define MPIX_MAX_ALLOCATIONS 64           /* Maximum number of allocations */
+#define MPIX_MEMORY_POOL_SIZE (1024 * 1024) /* 1M memory pool */
+#define MPIX_MAX_ALLOCATIONS 128            /* Maximum number of allocations */
 
 /* Memory block header */
 typedef struct mpix_mem_block
@@ -97,7 +98,7 @@ void *mpix_port_alloc(size_t size)
     {
         return NULL;
     }
-    
+
     void *ptr = pvPortMalloc(size);
     if (ptr != NULL)
     {
@@ -197,6 +198,26 @@ int mpix_port_init_exposure(void *dev, int32_t *def, int32_t *max)
     *def = 0;
     *max = 1;
 
+    struct mpix_sensor *sensor = (struct mpix_sensor *)dev;
+
+    if (!sensor)
+    {
+        return -1;
+    }
+
+    if (mpix_sensor_get_ctrl(sensor, V4L2_CID_EXPOSURE_ABSOLUTE, def) != 0)
+    {
+        return -1;
+    }
+    /* Try to query custom max exposure CID, fallback to current value if unsupported */
+    if (mpix_sensor_get_ctrl(sensor, MPIX_CID_EXPOSURE_MAX, max) != 0)
+    {
+        if (mpix_sensor_get_ctrl(sensor, V4L2_CID_EXPOSURE_ABSOLUTE, max) != 0)
+        {
+            return -1;
+        }
+    }
+
     return 0;
 }
 
@@ -204,5 +225,14 @@ int mpix_port_set_exposure(void *dev, int32_t val)
 {
     /* Not supported, do nothing */
 
+    struct mpix_sensor *sensor = (struct mpix_sensor *)dev;
+    if (!sensor)
+    {
+        return -1;
+    }
+    if (mpix_sensor_set_ctrl(sensor, V4L2_CID_EXPOSURE_ABSOLUTE, &val) != 0)
+    {
+        return -1;
+    }
     return 0;
 }
