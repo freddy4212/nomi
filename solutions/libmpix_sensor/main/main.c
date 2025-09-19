@@ -104,7 +104,7 @@ static void camera_task(void *pvParameters)
     // Initialize UART transport
     struct mpix_transport_uart_config cfg;
     mpix_transport_uart_config_default(&cfg);
-    cfg.port_id = USE_DW_UART_0;
+    cfg.port_id = USE_DW_UART_1;
     cfg.baudrate = UART_BAUDRATE_921600;
     cfg.tx_chunk = 4095;              // max chunk
     cfg.send_buffer_size = 64 * 1024; // larger TX ring for burst frames
@@ -171,7 +171,7 @@ static void camera_task(void *pvParameters)
             mpix_image_correction(&image, MPIX_CORRECTION_WHITE_BALANCE, (union mpix_correction_any *)&ctrls.correction.white_balance);
             mpix_image_correction(&image, MPIX_CORRECTION_COLOR_MATRIX, (union mpix_correction_any *)&ctrls.correction.color_matrix);
             mpix_image_kernel(&image, MPIX_KERNEL_DENOISE, 3);
-            //image.flag_print_ops = 1; // reduce log noise inside RTOS
+            // image.flag_print_ops = 1; // reduce log noise inside RTOS
             mpix_image_jpeg_encode(&image, JPEGE_Q_MED);
             mpix_image_to_buf(&image, jpeg.buffer, 128 * 1024);
             jpeg.width = image.width;
@@ -182,12 +182,12 @@ static void camera_task(void *pvParameters)
             send_image_frame(frame_counter, &jpeg);
             mpix_sensor_release_frame(sensor, &image);
 
-            // mpix_port_printf("Frame %lu: %ux%u, size=%u, err=%d, AE exp=%d, AWB R=%u B=%u, time=%dms\n",
-            //                  frame_counter, jpeg.width, jpeg.height, jpeg.size, jpeg.err,
-            //                  ctrls.exposure_level,
-            //                  ctrls.correction.white_balance.red_level,
-            //                  ctrls.correction.white_balance.blue_level,
-            //                  (int)(mpix_port_get_uptime_us() - last_time) / 1000);
+            mpix_port_printf("Frame %lu: %ux%u, size=%u, err=%d, AE exp=%d, AWB R=%u B=%u, time=%dms\n",
+                             frame_counter, jpeg.width, jpeg.height, jpeg.size, jpeg.err,
+                             ctrls.exposure_level,
+                             ctrls.correction.white_balance.red_level,
+                             ctrls.correction.white_balance.blue_level,
+                             (int)(mpix_port_get_uptime_us() - last_time) / 1000);
             last_time = mpix_port_get_uptime_us();
         }
         else

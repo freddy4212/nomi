@@ -25,6 +25,7 @@ set(LIBMPIX_STREAM_SRC
   ${LIBMPIX_STREAM_DIR}/src/sensor/datapath.c
   ${LIBMPIX_STREAM_DIR}/src/sensor.c
   ${LIBMPIX_STREAM_DIR}/src/transport/uart.c
+  ${LIBMPIX_STREAM_DIR}/src/protocol.c
 )
 
 component_register(
