@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 /**
- * UART transport implementation using underlying platform DEV_UART with DMA (uart_write_udma).
- * Provides non-blocking chunked send API integrated with mpix_transport ring buffering.
+ * UART transport implementation with DMA-based non-blocking transmission.
+ * Provides ring-buffered communication integrated with mpix_transport interface.
  */
 #include <stdint.h>
 #include <stdbool.h>
@@ -16,7 +16,7 @@
 #include <hx_drv_uart.h>
 #include "board.h"
 
-/* Default constants (used for backward compatibility) */
+/* Configuration defaults */
 #ifndef MPIX_UART_TX_CHUNK_DEFAULT
 #define MPIX_UART_TX_CHUNK_DEFAULT 4095
 #endif
@@ -26,82 +26,74 @@
 #ifndef MPIX_UART_RECV_BUFFER_DEFAULT
 #define MPIX_UART_RECV_BUFFER_DEFAULT (8 * 1024)
 #endif
+#define MPIX_UART_DMA_BUFFER_SIZE 4096
 
-/* Forward declaration for TX kick (needed by tx_done) */
+/* Forward declarations */
 static int _uart_kick_tx(struct mpix_transport *t);
 
-/* NOTE: The underlying UART DMA API (uart_write_udma / uart_read_udma) only
- * supplies a callback function pointer without a user argument. We therefore
- * create small per-port wrapper callbacks and keep a context pointer array.
- * This allows multiple UART transports simultaneously (up to DW_UART_NUM). */
+/* Global context and callback arrays for DMA completion handling */
 static struct mpix_uart_ctx *g_uart_ctx[DW_UART_NUM] = {0};
-
-static void (*const _uart_tx_cb_table[DW_UART_NUM])(void);
-static void (*const _uart_rx_cb_table[DW_UART_NUM])(void);
-
+static uint8_t rx_staging[DW_UART_NUM];
+static uint8_t tx_dma_buffer[DW_UART_NUM][MPIX_UART_DMA_BUFFER_SIZE];
 
 struct mpix_uart_ctx
 {
-	DEV_UART *dev;
-	volatile bool tx_busy;
-	struct mpix_transport *transport;
-	int port_id;
-	uint32_t baudrate;
-	uint32_t tx_chunk;
-	uint8_t *rx_staging;	  /* single-byte staging */
-	uint32_t tx_inflight_len; /* bytes of current DMA chunk */
+	DEV_UART *dev;					  /* UART device handle */
+	volatile bool tx_busy;			  /* TX DMA in progress */
+	volatile bool rx_busy;			  /* RX DMA in progress */
+	struct mpix_transport *transport; /* Back reference to transport */
+	int port_id;					  /* UART port identifier */
+	uint32_t baudrate;				  /* Communication baud rate */
+	uint32_t tx_chunk;				  /* Maximum TX chunk size */
+	uint32_t rx_staging_size;		  /* RX staging buffer size */
+	uint32_t tx_inflight_len;		  /* Current DMA transfer size */
 };
 
-static void _uart_tx_done_common(struct mpix_uart_ctx *ctx)
-{
-	if (!ctx)
-		return;
-	if (ctx->transport && ctx->tx_inflight_len)
-	{
-		struct mpix_transport *t = ctx->transport;
-		uint32_t remaining = ctx->tx_inflight_len;
-		while (remaining)
-		{
-			size_t tailroom = mpix_ring_tailroom(&t->send_ring);
-			size_t chunk = remaining < tailroom ? remaining : tailroom;
-			(void)mpix_ring_read(&t->send_ring, chunk);
-			remaining -= chunk;
-		}
-		ctx->tx_inflight_len = 0;
-	}
-	ctx->tx_busy = false;
-	if (ctx->transport)
-		_uart_kick_tx(ctx->transport);
-}
-
-/* RX DMA callback: push byte then restart */
-static void _uart_rx_done_common(struct mpix_uart_ctx *ctx)
-{
-	if (!ctx || !ctx->rx_staging)
-		return;
-	struct mpix_transport *t = ctx->transport;
-	if (!t)
-		return;
-	uint8_t *dst = mpix_ring_write(&t->recv_ring, 1);
-	if (dst)
-		*dst = ctx->rx_staging[0];
-	if (ctx->dev)
-	{
-		int pid = ctx->port_id;
-		if (pid < 0 || pid >= DW_UART_NUM)
-			pid = 0;
-		ctx->dev->uart_read_udma(ctx->rx_staging, 1, (void *)_uart_rx_cb_table[pid]);
-	}
-}
+/* DMA completion callbacks */
+static void _uart_tx_done_common(struct mpix_uart_ctx *ctx);
+static void _uart_rx_done_common(struct mpix_uart_ctx *ctx);
 
 static void _uart_tx_done0(void) { _uart_tx_done_common(g_uart_ctx[0]); }
 static void _uart_tx_done1(void) { _uart_tx_done_common(g_uart_ctx[1]); }
 static void _uart_tx_done2(void) { _uart_tx_done_common(g_uart_ctx[2]); }
-static void (*const _uart_tx_cb_table[DW_UART_NUM])(void) = {_uart_tx_done0, _uart_tx_done1, _uart_tx_done2};
+
 static void _uart_rx_done0(void) { _uart_rx_done_common(g_uart_ctx[0]); }
 static void _uart_rx_done1(void) { _uart_rx_done_common(g_uart_ctx[1]); }
 static void _uart_rx_done2(void) { _uart_rx_done_common(g_uart_ctx[2]); }
-static void (*const _uart_rx_cb_table[DW_UART_NUM])(void) = {_uart_rx_done0, _uart_rx_done1, _uart_rx_done2};
+
+static void (*const _uart_tx_cb_table[DW_UART_NUM])(void) = {
+	_uart_tx_done0, _uart_tx_done1, _uart_tx_done2};
+static void (*const _uart_rx_cb_table[DW_UART_NUM])(void) = {
+	_uart_rx_done0, _uart_rx_done1, _uart_rx_done2};
+
+static void _uart_tx_done_common(struct mpix_uart_ctx *ctx)
+{
+	if (!ctx || !ctx->transport)
+		return;
+
+	/* Mark DMA as available and try to send next chunk */
+	_uart_kick_tx(ctx->transport);
+}
+
+/* RX DMA callback: process received byte and restart DMA */
+static void _uart_rx_done_common(struct mpix_uart_ctx *ctx)
+{
+	if (!ctx || !ctx->transport || !ctx->dev)
+		return;
+
+	struct mpix_transport *t = ctx->transport;
+	ctx->rx_busy = false;
+
+	/* Push received byte to ring buffer */
+	uint8_t *dst = mpix_ring_write(&t->recv_ring, 1);
+	if (dst)
+		*dst = rx_staging[ctx->port_id];
+
+	/* Restart single-byte RX DMA */
+	int port_id = (ctx->port_id >= 0 && ctx->port_id < DW_UART_NUM) ? ctx->port_id : 0;
+	ctx->rx_busy = true;
+	ctx->dev->uart_read_udma(&rx_staging[ctx->port_id], 1, (void *)_uart_rx_cb_table[port_id]);
+}
 
 /* Forward declaration of ops */
 static int _uart_init(struct mpix_transport *t);
@@ -123,6 +115,55 @@ static const struct mpix_transport_ops uart_ops = {
 	.get_recv_available = _uart_get_recv_available,
 	.deinit = _uart_deinit,
 };
+
+static inline size_t mpix_ring_free(struct mpix_ring *ring)
+{
+	return (ring->head >= ring->tail ? ring->size - ring->head + ring->tail : ring->tail - ring->head) - 1;
+}
+
+static inline size_t mpix_ring_used(struct mpix_ring *ring)
+{
+	return (ring->head >= ring->tail ? ring->head - ring->tail : ring->size - ring->tail + ring->head);
+}
+static inline size_t mpix_ring_push(struct mpix_ring *ring, const uint8_t *data, size_t size)
+{
+	if (!data || size == 0)
+	{
+		return 0;
+	}
+	size_t free = mpix_ring_free(ring);
+	if (free == 0)
+	{
+		return 0;
+	}
+	size = size > free ? free : size;
+	for (size_t i = 0; i < size; i++)
+	{
+		ring->data[ring->head] = data[i];
+		ring->head = (ring->head + 1) % ring->size;
+	}
+	return size;
+}
+
+static inline size_t mpix_ring_pop(struct mpix_ring *ring, uint8_t *data, size_t size)
+{
+	if (!data || size == 0)
+	{
+		return 0;
+	}
+
+	size_t used = mpix_ring_used(ring);
+
+	size = size > used ? used : size;
+
+	for (size_t i = 0; i < size; i++)
+	{
+		data[i] = ring->data[ring->tail];
+		ring->tail = (ring->tail + 1) % ring->size;
+	}
+
+	return size;
+}
 
 void mpix_transport_uart_config_default(struct mpix_transport_uart_config *cfg)
 {
@@ -147,6 +188,7 @@ int mpix_transport_uart_create_with_config(struct mpix_transport *t, const struc
 	ctx->port_id = cfg->port_id;
 	ctx->baudrate = cfg->baudrate;
 	ctx->tx_chunk = cfg->tx_chunk;
+	ctx->rx_staging_size = 1; /* Keep 1-byte staging for immediate response */
 	ctx->transport = t;
 	t->ctx = ctx;
 	t->ops = &uart_ops;
@@ -177,35 +219,43 @@ static int _uart_init(struct mpix_transport *t)
 	if (!t || !t->ctx)
 		return -EINVAL;
 	struct mpix_uart_ctx *ctx = (struct mpix_uart_ctx *)t->ctx;
+
+	if (ctx->port_id == USE_DW_UART_1)
+	{
+		hx_drv_scu_set_PB6_pinmux(SCU_PB6_PINMUX_UART1_RX, 0);
+		hx_drv_scu_set_PB7_pinmux(SCU_PB7_PINMUX_UART1_TX, 0);
+		hx_drv_uart_init(USE_DW_UART_1, HX_UART1_BASE);
+	}
+
 	ctx->dev = hx_drv_uart_get_dev(ctx->port_id);
 	if (!ctx->dev)
 		return -ENODEV;
+
 	if (ctx->dev->uart_open(ctx->baudrate) != 0)
 	{
 		return -EIO;
 	}
+
 	ctx->tx_busy = false;
+	ctx->rx_busy = false;
 	t->state = MPIX_TRANSPORT_STATE_CONNECTED;
-	/* Allocate RX staging if not yet */
-	if (!ctx->rx_staging)
-	{
-		ctx->rx_staging = (uint8_t *)mpix_port_alloc(32); /* small aligned block */
-		if (ctx->rx_staging)
-			memset(ctx->rx_staging, 0, 32);
-	}
+
 	/* Register as active context (single instance support) */
 	if (ctx->port_id >= 0 && ctx->port_id < DW_UART_NUM)
 	{
 		g_uart_ctx[ctx->port_id] = ctx;
 	}
-	/* Start first RX DMA (single byte) */
-	if (ctx->rx_staging && ctx->dev)
+
+	/* Start first RX DMA (single byte for now) */
+	if (ctx->dev)
 	{
 		int pid = ctx->port_id;
 		if (pid < 0 || pid >= DW_UART_NUM)
 			pid = 0;
-		ctx->dev->uart_read_udma(ctx->rx_staging, 1, (void *)_uart_rx_cb_table[pid]);
+		ctx->rx_busy = true;
+		ctx->dev->uart_read_udma(&rx_staging[ctx->port_id], 1, (void *)_uart_rx_cb_table[pid]);
 	}
+
 	return 0;
 }
 
@@ -218,7 +268,9 @@ static bool _uart_is_recv_ready(struct mpix_transport *t)
 {
 	if (!t)
 		return false;
-	return mpix_ring_total_used(&t->recv_ring) > 0;
+	size_t available = mpix_ring_total_used(&t->recv_ring);
+
+	return available > 0;
 }
 static size_t _uart_get_send_space(struct mpix_transport *t)
 {
@@ -234,55 +286,47 @@ static size_t _uart_get_recv_available(struct mpix_transport *t)
 	return mpix_ring_total_used(&t->recv_ring);
 }
 
-/* Internal: kick DMA if idle */
+/* Start DMA transmission if idle and data is available */
 static int _uart_kick_tx(struct mpix_transport *t)
 {
 	struct mpix_uart_ctx *ctx = (struct mpix_uart_ctx *)t->ctx;
-	if (ctx->tx_busy)
+
+	size_t used = mpix_ring_used(&t->send_ring);
+	size_t chunk_size = used > MPIX_UART_DMA_BUFFER_SIZE ? MPIX_UART_DMA_BUFFER_SIZE : used;
+	if (chunk_size == 0)
+	{
+		ctx->tx_busy = false;
 		return 0;
-	/* Total bytes pending */
-	size_t pending = mpix_ring_total_used(&t->send_ring);
-	if (pending == 0)
-		return 0;
-	/* Contiguous bytes at tail */
-	size_t tailroom = mpix_ring_tailroom(&t->send_ring);
-	size_t chunk = pending < tailroom ? pending : tailroom;
-	if (chunk > ctx->tx_chunk)
-		chunk = ctx->tx_chunk;
-	uint8_t *ptr = t->send_ring.data + t->send_ring.tail;
-	SCB_CleanDCache_by_Addr((uint32_t *)ptr, chunk);
+	}
+
+	/* Start DMA transmission */
 	ctx->tx_busy = true;
-	ctx->tx_inflight_len = (uint32_t)chunk;
-	/* Select per-port tx callback */
-	int pid = ctx->port_id;
-	if (pid < 0 || pid >= DW_UART_NUM)
-		pid = 0;
-	ctx->dev->uart_write_udma(ptr, chunk, (void *)_uart_tx_cb_table[pid]);
-	return (int)chunk;
+	ctx->tx_inflight_len = chunk_size;
+	mpix_ring_pop(&t->send_ring, tx_dma_buffer[ctx->port_id], chunk_size);
+	SCB_CleanDCache_by_Addr((uint32_t *)tx_dma_buffer[ctx->port_id], chunk_size);
+	ctx->dev->uart_write_udma(tx_dma_buffer[ctx->port_id], chunk_size, (void *)_uart_tx_cb_table[ctx->port_id]);
+
+	return (int)chunk_size;
 }
 
 static int _uart_send(struct mpix_transport *t, const uint8_t *data, size_t size)
 {
 	if (!t || !data || size == 0)
 		return -EINVAL;
+
+	struct mpix_uart_ctx *ctx = (struct mpix_uart_ctx *)t->ctx;
+	if (!ctx)
+		return -EINVAL;
+
 	size_t written = 0;
 	while (written < size)
 	{
-		size_t headroom = mpix_ring_headroom(&t->send_ring);
-		if (headroom == 0)
-			break; /* ring full */
-		size_t chunk = size - written;
-		if (chunk > headroom)
-			chunk = headroom;
-		uint8_t *dst = mpix_ring_write(&t->send_ring, chunk);
-		if (!dst)
-			break;
-		memcpy(dst, data + written, chunk);
-		written += chunk;
+		written += mpix_ring_push(&t->send_ring, data + written, size - written);
+		if (!ctx->tx_busy)
+			_uart_kick_tx(t);
 	}
-	if (written > 0)
-		_uart_kick_tx(t);
-	return (int)written; /* 0 if full */
+
+	return (int)written;
 }
 
 static int _uart_recv(struct mpix_transport *t, uint8_t *buffer, size_t size)
@@ -294,6 +338,7 @@ static int _uart_recv(struct mpix_transport *t, uint8_t *buffer, size_t size)
 		return 0;
 	if (size > avail)
 		size = avail;
+
 	size_t copied = 0;
 	while (copied < size)
 	{
@@ -307,6 +352,7 @@ static int _uart_recv(struct mpix_transport *t, uint8_t *buffer, size_t size)
 		memcpy(buffer + copied, src, chunk);
 		copied += chunk;
 	}
+
 	return (int)copied;
 }
 
@@ -319,13 +365,7 @@ static void _uart_deinit(struct mpix_transport *t)
 	{
 		ctx->dev->uart_close();
 	}
-	if (ctx->rx_staging)
-	{
-		/* free staging */
-		/* assuming mpix_port_alloc uses free-compatible allocator */
-		mpix_port_free(ctx->rx_staging);
-		ctx->rx_staging = NULL;
-	}
+
 	/* Buffers freed externally if desired (not freeing here to allow reuse) */
 	/* Mark state */
 	t->state = MPIX_TRANSPORT_STATE_DISCONNECTED;

@@ -3,6 +3,9 @@
 #define MPIX_TRANSPORT_UART_H
 
 #include <mpix/transport.h>
+#include <console_io.h>
+#include <hx_drv_scu.h>
+#include <hx_drv_uart.h>
 
 #ifdef __cplusplus
 extern "C" {
