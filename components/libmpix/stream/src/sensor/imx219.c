@@ -686,18 +686,12 @@ static int imx219_stop_stream(struct mpix_sensor *sensor)
         return 0; /* Already stopped */
     }
 
-    /* Stop datapath first */
-    datapath_stop();
-
     /* Stop streaming */
     ret = imx219_write_reg(ctx->i2c_addr, IMX219_STREAMING_REG, IMX219_MODE_STANDBY);
     if (ret < 0)
     {
         return ret;
     }
-
-    /* Disable MIPI CSI */
-    mipi_csi_disable();
 
     ctx->streaming = false;
     sensor->state = MPIX_SENSOR_STATE_INITIALIZED;
@@ -762,6 +756,9 @@ static void imx219_deinit(struct mpix_sensor *sensor)
     {
         imx219_stop_stream(sensor);
     }
+
+    datapath_stop();
+    mipi_csi_disable();
 
     ctx->initialized = false;
     sensor->state = MPIX_SENSOR_STATE_IDLE;

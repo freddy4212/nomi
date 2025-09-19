@@ -98,13 +98,13 @@ bool datapath_is_frame_ready(void)
 
 uint32_t datapath_acquire_raw_buffer(void)
 {
+    g_frame_ready = false;
     hx_InvalidateDCache_by_Addr((volatile void *)g_wdma2_baseaddr, g_current_config.width * g_current_config.height);
     return g_wdma2_baseaddr;
 }
 
 int datapath_release_raw_buffer(void)
 {
-    g_frame_ready = false;
     sensordplib_retrigger_capture();
     return 0;
 }
