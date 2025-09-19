@@ -237,20 +237,10 @@ int mpix_protocol_process(struct mpix_protocol_context *ctx)
         }
     }
 
-/* Debug: Print received header for diagnosis */
-#ifdef DEBUG_PROTOCOL
-    printf("[PROTOCOL] Received header: magic=0x%08X, version=%d, cmd=0x%02X, len=%d, checksum=0x%04X\n",
-           header.magic_start, header.version, header.cmd_type, header.payload_length, header.checksum);
-#endif
-
     /* Validate header magic */
     if (header.magic_start != MPIX_PROTOCOL_MAGIC_START)
     {
         ctx->error_counter++;
-#ifdef DEBUG_PROTOCOL
-        printf("[PROTOCOL] Invalid magic start: expected 0x%08X, got 0x%08X\n",
-               MPIX_PROTOCOL_MAGIC_START, header.magic_start);
-#endif
         /* Try to recover by searching for the next magic start */
         return mpix_protocol_recover_sync(ctx);
     }
@@ -259,10 +249,6 @@ int mpix_protocol_process(struct mpix_protocol_context *ctx)
     if (header.version != MPIX_PROTOCOL_VERSION)
     {
         ctx->error_counter++;
-#ifdef DEBUG_PROTOCOL
-        printf("[PROTOCOL] Invalid version: expected %d, got %d\n",
-               MPIX_PROTOCOL_VERSION, header.version);
-#endif
         return -EBADMSG;
     }
 
@@ -270,10 +256,6 @@ int mpix_protocol_process(struct mpix_protocol_context *ctx)
     if (header.payload_length > MPIX_PROTOCOL_MAX_PAYLOAD)
     {
         ctx->error_counter++;
-#ifdef DEBUG_PROTOCOL
-        printf("[PROTOCOL] Payload too large: %d > %d\n",
-               header.payload_length, MPIX_PROTOCOL_MAX_PAYLOAD);
-#endif
         return -EBADMSG;
     }
 
@@ -283,10 +265,6 @@ int mpix_protocol_process(struct mpix_protocol_context *ctx)
     if (calc_checksum != header.checksum)
     {
         ctx->error_counter++;
-#ifdef DEBUG_PROTOCOL
-        printf("[PROTOCOL] Header checksum mismatch: expected 0x%04X, got 0x%04X\n",
-               calc_checksum, header.checksum);
-#endif
         return -EBADMSG;
     }
 
@@ -310,11 +288,6 @@ int mpix_protocol_process(struct mpix_protocol_context *ctx)
             }
             else
             {
-/* Partial payload received */
-#ifdef DEBUG_PROTOCOL
-                printf("[PROTOCOL] Partial payload: expected %d, got %d\n",
-                       header.payload_length, ret);
-#endif
                 return -EAGAIN;
             }
         }
@@ -803,8 +776,6 @@ static int protocol_handle_stream_cmd(struct mpix_protocol_context *ctx,
             return mpix_protocol_send_response(ctx, cmd_type, MPIX_STATUS_INVALID_PARAM, NULL, 0);
         }
         ctx->stream_mode = (enum mpix_protocol_stream_mode)mode_config->mode;
-        mpix_port_printf("Setting stream mode to %d (auto: %d)\n",
-                         mode_config->mode, mode_config->enable_auto);
         /* For backward compatibility, enable_auto controls all algorithms */
         if (mode_config->enable_auto)
         {
@@ -969,10 +940,6 @@ static int mpix_protocol_recover_sync(struct mpix_protocol_context *ctx)
         return -EINVAL;
     }
 
-#ifdef DEBUG_PROTOCOL
-    printf("[PROTOCOL] Attempting to recover synchronization...\n");
-#endif
-
     /* Try to find the next valid magic start sequence */
     uint8_t byte;
     uint32_t search_buffer = 0;
@@ -993,20 +960,12 @@ static int mpix_protocol_recover_sync(struct mpix_protocol_context *ctx)
 
         if (search_buffer == MPIX_PROTOCOL_MAGIC_START)
         {
-#ifdef DEBUG_PROTOCOL
-            printf("[PROTOCOL] Found sync after discarding %d bytes\n", bytes_discarded - 4);
-#endif
-
             /* We found the magic start, but we've consumed it.
              * We need to put it back somehow or handle this differently.
              * For now, we'll return -EAGAIN to retry processing. */
             return -EAGAIN;
         }
     }
-
-#ifdef DEBUG_PROTOCOL
-    printf("[PROTOCOL] Failed to find sync, discarded %d bytes\n", bytes_discarded);
-#endif
 
     return -EBADMSG;
 }

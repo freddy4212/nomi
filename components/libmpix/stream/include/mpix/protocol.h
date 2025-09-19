@@ -90,7 +90,8 @@ enum mpix_protocol_stream_mode {
     MPIX_STREAM_MODE_RAW           = 0x00,  /* Raw sensor data */
     MPIX_STREAM_MODE_RGB           = 0x01,  /* Processed RGB data */
     MPIX_STREAM_MODE_JPEG          = 0x02,  /* JPEG compressed */
-    MPIX_STREAM_MODE_AUTO          = 0x03,  /* Auto mode with ISP */
+    MPIX_STREAM_MODE_QOI           = 0x03,  /* QOI compressed */
+    MPIX_STREAM_MODE_AUTO          = 0x04,  /* Auto mode with ISP */
 };
 
 /* Protocol frame header */

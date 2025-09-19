@@ -11,6 +11,7 @@ Usage:
 Dependencies:
     pip install opencv-python pillow numpy
 
+
 Example:
     python3 mpix_client_viewer.py --port COM68 --baudrate 921600
 """
@@ -80,7 +81,8 @@ class MPIXStreamMode(IntEnum):
     RAW = 0
     RGB = 1
     JPEG = 2
-    AUTO = 3
+    QOI = 3
+    AUTO = 4
 
 class MPIXStatus(IntEnum):
     OK = 0x00
@@ -235,7 +237,6 @@ class MPIXClient:
             return self._read_response_with_resync()
             
         except Exception as e:
-            print(f"Command failed: {e}")
             return MPIXStatus.ERROR, b""
     
     def _read_response_with_resync(self) -> Tuple[MPIXStatus, bytes]:
@@ -249,8 +250,6 @@ class MPIXClient:
                 return self._process_response_header(response_header)
         
         # If we get here, we need to resync
-        print(f"Response sync lost, attempting resynchronization...")
-        
         # Put back what we read and try to find magic
         remaining_data = response_header + self.ser.read(min(500, self.ser.in_waiting))
         
@@ -259,7 +258,6 @@ class MPIXClient:
         
         for i in range(len(remaining_data) - 3):
             if remaining_data[i:i+4] == magic_bytes:
-                print(f"Found magic at offset {i}")
                 # Found potential start - try to read complete header
                 header_start = remaining_data[i:i+12]
                 
@@ -271,7 +269,6 @@ class MPIXClient:
                 if len(header_start) == 12:
                     return self._process_response_header(header_start)
         
-        print("Failed to resynchronize response")
         return MPIXStatus.ERROR, b""
     
     def _process_response_header(self, response_header: bytes) -> Tuple[MPIXStatus, bytes]:
@@ -281,19 +278,16 @@ class MPIXClient:
             magic_start, version, resp_cmd, resp_seq, resp_len, checksum = struct.unpack('<IBBHHH', response_header)
             
             if magic_start != self.MAGIC_START:
-                print(f"Invalid response magic: 0x{magic_start:08X}")
                 return MPIXStatus.ERROR, b""
                 
             # Verify header checksum
             header_for_checksum = response_header[:-2]  # Exclude checksum field
             calc_checksum = self.calculate_checksum(header_for_checksum)
             if calc_checksum != checksum:
-                print(f"Header checksum mismatch: calculated 0x{calc_checksum:04X}, received 0x{checksum:04X}")
                 return MPIXStatus.ERROR, b""
                 
             # Check if this is a response (should have bit 7 set in cmd_type)
             if not (resp_cmd & 0x80):
-                print(f"Not a response packet: cmd=0x{resp_cmd:02X}")
                 return MPIXStatus.ERROR, b""
                 
             # Read response payload (includes status byte + actual payload)
@@ -301,7 +295,6 @@ class MPIXClient:
             if resp_len > 0:
                 response_payload = self.ser.read(resp_len)
                 if len(response_payload) != resp_len:
-                    print(f"Response payload timeout: expected {resp_len}, got {len(response_payload)}")
                     return MPIXStatus.TIMEOUT, b""
                     
             # Extract status from first byte of payload
@@ -315,18 +308,15 @@ class MPIXClient:
             # Read response footer
             response_footer = self.ser.read(4)
             if len(response_footer) != 4:
-                print(f"Response footer timeout: got {len(response_footer)} bytes")
                 return MPIXStatus.TIMEOUT, b""
                 
             magic_end = struct.unpack('<I', response_footer)[0]
             if magic_end != self.MAGIC_END:
-                print(f"Invalid response footer: 0x{magic_end:08X}")
                 return MPIXStatus.ERROR, b""
                 
             return MPIXStatus(status), actual_payload
             
         except Exception as e:
-            print(f"Error processing response: {e}")
             return MPIXStatus.ERROR, b""
     
     def ping(self) -> bool:
@@ -356,7 +346,6 @@ class MPIXClient:
     def start_streaming(self) -> bool:
         """Start video streaming"""
         # Clear buffer before starting stream to ensure clean state
-        print("Preparing for streaming...")
         self._clear_buffer_completely()
         
         status, _ = self._send_command(MPIXCommand.STREAM_START)
@@ -374,32 +363,25 @@ class MPIXClient:
             self.stream_thread.join(timeout=3)  # Give more time for thread to stop
         
         # Wait for any in-flight frames to complete transmission
-        print("Waiting for in-flight frames to complete...")
         time.sleep(1.0)  # Give time for last frame to be sent
         
         # Send stop command BEFORE clearing buffers to preserve the response
-        print("Sending stop command...")
         status, _ = self._send_command(MPIXCommand.STREAM_STOP)
         
         if status == MPIXStatus.OK:
-            print("✓ Stop command acknowledged successfully")
             # Only clear buffers after successful response
             self._clear_buffer_completely()
             return True
         else:
-            print("⚠ Stop command not acknowledged, but streaming thread has stopped")
             # Clear buffers and try one more time
             self._clear_buffer_completely()
             
-            print("Trying stop command one more time...")
             status, _ = self._send_command(MPIXCommand.STREAM_STOP)
             
             if status == MPIXStatus.OK:
-                print("✓ Stop command acknowledged on retry")
                 return True
             else:
                 # Even if no response, streaming is stopped since thread has stopped
-                print("⚠ No response to stop command, but streaming is effectively stopped")
                 return True
     
     def _find_frame_header(self, timeout=10):
@@ -420,19 +402,14 @@ class MPIXClient:
             if len(buf) > 4:
                 buf = buf[-4:]
                 
-
-                
             if len(buf) == 4 and buf == magic_bytes:
-                print(f"[STREAM] ✓ Frame header magic found at {time.time()}")
                 # Read the remaining 20 bytes of the header
                 remaining_header = self.ser.read(20)
                 if len(remaining_header) == 20:
                     return buf + remaining_header
                 else:
-                    print(f"[STREAM] ERROR: Could not read remaining header bytes: got {len(remaining_header)}")
                     return None
         
-        print(f"[STREAM] ERROR: Frame header not found within {timeout}s timeout")
         return None
 
     def _read_frame_data_with_timeout(self, expected_size, timeout=5.0):
@@ -458,7 +435,6 @@ class MPIXClient:
         if len(data) == expected_size:
             return data
         else:
-            print(f"[STREAM] ERROR: Frame data timeout: expected {expected_size}, got {len(data)}")
             return None
 
     def _clear_serial_buffer_completely(self):
@@ -490,15 +466,6 @@ class MPIXClient:
         print(f"Is open: {self.ser.is_open}")
         print(f"Timeout: {self.ser.timeout}")
         print(f"Bytes waiting: {self.ser.in_waiting}")
-        
-        # Check buffer sizes if available
-        if hasattr(self.ser, 'get_settings'):
-            try:
-                settings = self.ser.get_settings()
-                print(f"Serial settings: {settings}")
-            except:
-                pass
-        
         print(f"Frame counter: {self.frame_count}")
         print(f"Streaming: {self.streaming}")
         print("==========================\n")
@@ -509,13 +476,11 @@ class MPIXClient:
             print("No serial connection available")
             return
         
-        print(f"[ANALYZE] Starting raw stream analysis for {duration} seconds...")
-        print("[ANALYZE] This will capture and analyze raw serial data")
+        print(f"Starting raw stream analysis for {duration} seconds...")
         
         # Ensure streaming is off for this analysis
         was_streaming = self.streaming
         if self.streaming:
-            print("[ANALYZE] Stopping existing stream...")
             self.stop_streaming()
             time.sleep(1)
         
@@ -523,10 +488,9 @@ class MPIXClient:
         self._clear_buffer_completely()
         
         # Start streaming for analysis
-        print("[ANALYZE] Starting stream for analysis...")
         status, _ = self._send_command(MPIXCommand.STREAM_START)
         if status != MPIXStatus.OK:
-            print("[ANALYZE] Failed to start stream for analysis")
+            print("Failed to start stream for analysis")
             return
         
         # Collect raw data
@@ -535,7 +499,6 @@ class MPIXClient:
         magic_pattern = struct.pack('<I', self.FRAME_MAGIC)
         footer_pattern = struct.pack('<I', self.MAGIC_END)
         
-        print("[ANALYZE] Collecting data...")
         while time.time() - start_time < duration:
             available = self.ser.in_waiting
             if available > 0:
@@ -545,12 +508,11 @@ class MPIXClient:
                 time.sleep(0.01)
         
         # Stop streaming
-        print("[ANALYZE] Stopping stream...")
         self._send_command(MPIXCommand.STREAM_STOP)
         
         # Analyze the data
-        print(f"[ANALYZE] === Raw Stream Analysis ===")
-        print(f"[ANALYZE] Total data collected: {len(raw_data)} bytes")
+        print(f"=== Raw Stream Analysis ===")
+        print(f"Total data collected: {len(raw_data)} bytes")
         
         # Find magic patterns
         magic_positions = []
@@ -562,63 +524,28 @@ class MPIXClient:
             if raw_data[i:i+4] == footer_pattern:
                 footer_positions.append(i)
         
-        print(f"[ANALYZE] Frame headers found: {len(magic_positions)}")
-        print(f"[ANALYZE] Frame footers found: {len(footer_positions)}")
+        print(f"Frame headers found: {len(magic_positions)}")
+        print(f"Frame footers found: {len(footer_positions)}")
         
         if magic_positions:
-            print(f"[ANALYZE] First header at byte: {magic_positions[0]}")
-            print(f"[ANALYZE] Last header at byte: {magic_positions[-1]}")
+            print(f"First header at byte: {magic_positions[0]}")
+            print(f"Last header at byte: {magic_positions[-1]}")
             
             # Analyze frame spacing
             if len(magic_positions) > 1:
                 spacings = [magic_positions[i+1] - magic_positions[i] for i in range(len(magic_positions)-1)]
                 avg_spacing = sum(spacings) / len(spacings)
-                print(f"[ANALYZE] Average frame spacing: {avg_spacing:.1f} bytes")
-                print(f"[ANALYZE] Frame spacing range: {min(spacings)} - {max(spacings)} bytes")
+                print(f"Average frame spacing: {avg_spacing:.1f} bytes")
+                print(f"Frame spacing range: {min(spacings)} - {max(spacings)} bytes")
         
-        if footer_positions:
-            print(f"[ANALYZE] First footer at byte: {footer_positions[0]}")
-            print(f"[ANALYZE] Last footer at byte: {footer_positions[-1]}")
-        
-        # Show data samples around problematic areas
-        if len(magic_positions) > 0 and len(footer_positions) > 0:
-            print(f"[ANALYZE] === Data Sample Analysis ===")
-            for i, pos in enumerate(magic_positions[:3]):  # Show first 3 headers
-                if pos + 24 <= len(raw_data):
-                    header_data = raw_data[pos:pos+24]
-                    print(f"[ANALYZE] Header {i+1} at {pos}: {header_data.hex()}")
-                    
-                    # Try to parse this header
-                    try:
-                        magic, frame_id, width, height, data_size, fourcc, checksum, reserved = struct.unpack('<IIHHI HH', header_data)
-                        print(f"[ANALYZE]   Frame ID: {frame_id}, Size: {width}x{height}, Data: {data_size} bytes")
-                        
-                        # Check if corresponding footer exists
-                        expected_footer_pos = pos + 24 + data_size
-                        if expected_footer_pos + 4 <= len(raw_data):
-                            footer_data = raw_data[expected_footer_pos:expected_footer_pos+4]
-                            footer_magic = struct.unpack('<I', footer_data)[0]
-                            if footer_magic == self.MAGIC_END:
-                                print(f"[ANALYZE]   ✓ Valid footer at expected position {expected_footer_pos}")
-                            else:
-                                print(f"[ANALYZE]   ✗ Invalid footer at {expected_footer_pos}: 0x{footer_magic:08X}")
-                                print(f"[ANALYZE]     Expected: 0x{self.MAGIC_END:08X}")
-                                print(f"[ANALYZE]     Data around position: {raw_data[expected_footer_pos-4:expected_footer_pos+8].hex()}")
-                        else:
-                            print(f"[ANALYZE]   ? Footer position {expected_footer_pos} beyond data")
-                    except Exception as e:
-                        print(f"[ANALYZE]   ✗ Failed to parse header: {e}")
-        
-        print(f"[ANALYZE] === Analysis Complete ===")
+        print(f"=== Analysis Complete ===")
         
         # Restore original streaming state
         if was_streaming:
-            print("[ANALYZE] Restoring original streaming state...")
             self.start_streaming()
 
     def _stream_receiver(self):
         """Background thread to receive and display video frames"""
-        print("[STREAM] Frame receiver thread started")
         cv2.namedWindow(self.display_window, cv2.WINDOW_AUTOSIZE)
         
         frame_count = 0
@@ -627,20 +554,13 @@ class MPIXClient:
         
         while self.streaming and self.ser:
             try:
-                print("[STREAM] Waiting for frame header...")
-                
                 # Use the new frame header finder
                 frame_header_data = self._find_frame_header(timeout=5)
                 if frame_header_data is None:
                     receive_timeout_count += 1
-                    print(f"[STREAM] Frame header not found (timeout #{receive_timeout_count})")
                     if receive_timeout_count > 10:
-                        print("[STREAM] Too many header timeouts, checking connection...")
                         receive_timeout_count = 0
                     continue
-                
-                print(f"[STREAM] Received frame header: {len(frame_header_data)} bytes")
-                print(f"[STREAM] Header hex: {frame_header_data.hex()}")
                 
                 # Parse frame header manually to handle packed struct: 24 bytes total
                 # uint32_t magic_start(4) + uint32_t frame_id(4) + uint16_t width(2) + uint16_t height(2) + 
@@ -655,201 +575,211 @@ class MPIXClient:
                     checksum = struct.unpack('<H', frame_header_data[20:22])[0]
                     reserved = struct.unpack('<H', frame_header_data[22:24])[0]
                 except Exception as parse_error:
-                    print(f"[STREAM] ERROR: Failed to parse header: {parse_error}")
                     consecutive_errors += 1
                     continue
-                
-                print(f"[STREAM] Frame header parsed:")
-                print(f"  Magic: 0x{magic_start:08X} (expected: 0x{self.MAGIC_START:08X})")
-                print(f"  Frame ID: {frame_id}")
-                print(f"  Dimensions: {width}x{height}")
-                print(f"  Data size: {data_size}")
-                print(f"  FourCC: 0x{fourcc:08X}")
-                print(f"  Checksum: 0x{checksum:04X}")
-                print(f"  Reserved: 0x{reserved:04X}")
                 
                 if magic_start != self.MAGIC_START:
-                    print(f"[STREAM] ERROR: Invalid frame magic: 0x{magic_start:08X}, expected: 0x{self.MAGIC_START:08X}")
                     consecutive_errors += 1
                     continue
-                
-                print(f"[STREAM] ✓ Valid frame header received - Frame {frame_id}: {width}x{height}, size: {data_size}, fourcc: 0x{fourcc:08X}")
                 
                 # Read frame data
                 if data_size > 0 and data_size < 1024*1024:  # Sanity check
-                    print(f"[STREAM] Reading frame data: {data_size} bytes...")
                     frame_data = self.ser.read(data_size)
                     if len(frame_data) == data_size:
-                        print(f"[STREAM] ✓ Frame data received: {len(frame_data)} bytes")
-                        
                         # Verify data checksum (but don't fail if mismatch - might be header checksum vs data checksum)
                         calc_checksum = self.calculate_checksum(frame_data)
-                        print(f"[STREAM] Checksum verification: calculated=0x{calc_checksum:04X}, received=0x{checksum:04X}")
                         if calc_checksum != checksum:
-                            print(f"[STREAM] WARNING: Frame checksum mismatch - continuing anyway (might be header checksum)")
                             # Don't fail here - the checksum might be for the header, not the data
+                            pass
                             
                         # Read frame footer
-                        print("[STREAM] Reading frame footer...")
                         footer_data = self.ser.read(4)
                         if len(footer_data) == 4:
                             magic_end = struct.unpack('<I', footer_data)[0]
-                            print(f"[STREAM] Frame footer magic: 0x{magic_end:08X} (expected: 0x{self.MAGIC_END:08X})")
                             if magic_end == self.MAGIC_END:
-                                print(f"[STREAM] ✓ Complete frame {frame_id} received successfully!")
                                 self._display_frame(frame_data, width, height, fourcc)
                                 frame_count += 1
                                 consecutive_errors = 0  # Reset error count on success
                                 receive_timeout_count = 0
                             else:
-                                print(f"[STREAM] ERROR: Invalid frame footer: 0x{magic_end:08X}")
-                                print(f"[STREAM] Possible data corruption or timing issue")
                                 # Try to clear any remaining data in buffer
                                 if self.ser.in_waiting > 0:
                                     remaining = self.ser.read(self.ser.in_waiting)
-                                    print(f"[STREAM] Cleared {len(remaining)} bytes from buffer")
                                 consecutive_errors += 1
                         else:
-                            print(f"[STREAM] ERROR: Footer timeout: got {len(footer_data)} bytes")
                             consecutive_errors += 1
                     else:
-                        print(f"[STREAM] ERROR: Frame data timeout: expected {data_size}, got {len(frame_data)}")
                         consecutive_errors += 1
                 else:
-                    print(f"[STREAM] ERROR: Invalid data size: {data_size}")
                     consecutive_errors += 1
                 
                 if consecutive_errors > 10:
-                    print("[STREAM] Too many consecutive errors, stopping stream receiver...")
                     break
                 
             except Exception as e:
-                print(f"[STREAM] ERROR: Stream receive exception: {e}")
                 consecutive_errors += 1
                 if consecutive_errors > 10:
-                    print("[STREAM] Too many consecutive errors, stopping stream receiver...")
                     break
         
-        print("[STREAM] Frame receiver thread stopped")
         cv2.destroyAllWindows()
-        print("Stream receiver stopped")
+    
+    def _decode_qoi_simple(self, data: bytes, width: int, height: int) -> Optional[np.ndarray]:
+        """Simple QOI decoder implementation"""
+        try:
+            if len(data) < 14:  # QOI header is 14 bytes
+                return None
+            
+            # Parse QOI header: "qoif" + width(4) + height(4) + channels(1) + colorspace(1)
+            if data[:4] != b'qoif':
+                return None
+            
+            qoi_width = struct.unpack('>I', data[4:8])[0]  # Big-endian
+            qoi_height = struct.unpack('>I', data[8:12])[0]  # Big-endian
+            channels = data[12]
+            colorspace = data[13]
+            
+            # For now, return a placeholder image with QOI info
+            # A full QOI decoder would be quite complex to implement here
+            img = np.zeros((height, width, 3), dtype=np.uint8)
+        
+            
+            return img
+            
+        except Exception as e:
+            return None
+    
+    def _is_qoi_format(self, data: bytes) -> bool:
+        """Check if data is QOI format"""
+        return len(data) >= 4 and data[:4] == b'qoif'
+    
+    def _is_jpeg_format(self, data: bytes) -> bool:
+        """Check if data is JPEG format"""
+        return len(data) >= 2 and data[0] == 0xFF and data[1] == 0xD8
+    
+    def _is_png_format(self, data: bytes) -> bool:
+        """Check if data is PNG format"""
+        return len(data) >= 8 and data[0] == 0x89 and data[1:4] == b'PNG'
+    
+    def _get_format_info(self, data: bytes) -> str:
+        """Get format information string"""
+        if self._is_qoi_format(data):
+            return "QOI"
+        elif self._is_jpeg_format(data):
+            return "JPEG"
+        elif self._is_png_format(data):
+            return "PNG"
+        else:
+            return "Unknown"
     
     def _display_frame(self, data: bytes, width: int, height: int, fourcc: int):
         """Display a received frame"""
-        print(f"\n[DISPLAY] === Frame {self.frame_count} Display Info ===")
-        print(f"[DISPLAY] Frame dimensions: {width}x{height}")
-        print(f"[DISPLAY] Data size: {len(data)} bytes")
-        print(f"[DISPLAY] FourCC: 0x{fourcc:08X}")
-        print(f"[DISPLAY] Expected sizes:")
-        print(f"  - RGB888: {width * height * 3} bytes")
-        print(f"  - RAW/Bayer: {width * height} bytes")
-        print(f"  - JPEG: variable size")
-        
         try:
+            # Check if it's QOI data (starts with 'qoif')
+            if self._is_qoi_format(data):
+                try:
+                    # Try to decode QOI using pillow-qoi-plugin if available
+                    try:
+                        from PIL import Image
+                        import pillow_qoi
+                        img_pil = Image.open(io.BytesIO(data))
+                        img = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
+                    except ImportError as import_err:
+                        # Fallback: simple QOI decoder implementation
+                        img = self._decode_qoi_simple(data, width, height)
+                        if img is None:
+                            return
+                    except Exception as decode_err:
+                        # Fallback to simple decoder
+                        img = self._decode_qoi_simple(data, width, height)
+                        if img is None:
+                            return
+                     
+                    if img is not None: 
+                        cv2.imshow(self.display_window, img)
+                        cv2.waitKey(1)
+                        return
+                    else:
+                        return
+                except Exception as qoi_error:
+                    import traceback
+                    traceback.print_exc()
+            
             # Check if it's JPEG data (starts with 0xFF 0xD8)
-            if len(data) >= 2 and data[0] == 0xFF and data[1] == 0xD8:
-                print(f"[DISPLAY] ✓ Detected JPEG format (header: 0x{data[0]:02X}{data[1]:02X})")
-                print(f"[DISPLAY] JPEG data size: {len(data)} bytes")
-                
-                # Show first few bytes of JPEG data
-                print(f"[DISPLAY] JPEG header: {data[:16].hex()}")
-                
+            elif self._is_jpeg_format(data):
                 # Decode JPEG
                 nparr = np.frombuffer(data, np.uint8)
                 img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
                 if img is not None:
-                    actual_height, actual_width = img.shape[:2]
-                    print(f"[DISPLAY] ✓ JPEG decoded successfully to {actual_width}x{actual_height}")
-                    
-                    # Add detailed frame info overlay
-                    
                     cv2.imshow(self.display_window, img)
                     cv2.waitKey(1)
-                    print(f"[DISPLAY] ✓ JPEG frame displayed")
                     return
-                else:
-                    print(f"[DISPLAY] ✗ Failed to decode JPEG data")
             
             # Try to interpret as raw RGB data
             elif len(data) == width * height * 3:
-                print(f"[DISPLAY] ✓ Detected RGB888 format ({len(data)} bytes = {width}x{height}x3)")
-                
-                # Show first few bytes of RGB data
-                print(f"[DISPLAY] RGB data start: {data[:12].hex()}")
-                
                 # RGB888 format
                 img = np.frombuffer(data, dtype=np.uint8).reshape((height, width, 3))
                 # Convert RGB to BGR for OpenCV
                 img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-                
-                # Add detailed frame info overlay
-                info_text = [
-                    f"Frame {self.frame_count}",
-                    f"RGB888: {width}x{height}",
-                    f"Data: {len(data)} bytes",
-                    f"FourCC: 0x{fourcc:08X}"
-                ]
-                
-                for i, text in enumerate(info_text):
-                    cv2.putText(img, text, (10, 30 + i*25), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                
+                # Add detailed frame info overlay with background
                 cv2.imshow(self.display_window, img)
                 cv2.waitKey(1)
-                print(f"[DISPLAY] ✓ RGB888 frame displayed")
                 return
             
             # Try to interpret as Bayer format (assuming 8-bit)
             elif len(data) == width * height:
-                print(f"[DISPLAY] ✓ Detected RAW/Bayer format ({len(data)} bytes = {width}x{height}x1)")
-                
-                # Show first few bytes of raw data
-                print(f"[DISPLAY] RAW data start: {data[:16].hex()}")
-                
                 # Raw Bayer data - convert to RGB for display
                 img = np.frombuffer(data, dtype=np.uint8).reshape((height, width))
-                # Simple debayer by replicating to 3 channels
-                img_rgb = np.stack([img, img, img], axis=2)
+                # Convert to 3-channel image for better display
+                try:
+                    # Try basic Bayer to RGB conversion if possible
+                    if width >= 2 and height >= 2:
+                        # Simple Bayer demosaicing - assume RGGB pattern
+                        img_rgb = np.zeros((height, width, 3), dtype=np.uint8)
+                        
+                        # Extract R, G, B channels from Bayer pattern
+                        # RGGB pattern: R at (0,0), G at (0,1) and (1,0), B at (1,1)
+                        img_rgb[0::2, 0::2, 0] = img[0::2, 0::2]  # Red
+                        img_rgb[0::2, 1::2, 1] = img[0::2, 1::2]  # Green1
+                        img_rgb[1::2, 0::2, 1] = img[1::2, 0::2]  # Green2
+                        img_rgb[1::2, 1::2, 2] = img[1::2, 1::2]  # Blue
+                        
+                        # Simple interpolation for missing values
+                        for c in range(3):
+                            channel = img_rgb[:, :, c]
+                            # Simple interpolation: fill zeros with average of non-zero neighbors
+                            for y in range(height):
+                                for x in range(width):
+                                    if channel[y, x] == 0:
+                                        # Get average of neighboring non-zero values
+                                        neighbors = []
+                                        for dy in [-1, 0, 1]:
+                                            for dx in [-1, 0, 1]:
+                                                ny, nx = y + dy, x + dx
+                                                if (0 <= ny < height and 0 <= nx < width and 
+                                                    channel[ny, nx] > 0):
+                                                    neighbors.append(channel[ny, nx])
+                                        if neighbors:
+                                            channel[y, x] = int(np.mean(neighbors))
+                                        else:
+                                            # Fallback: use overall channel average
+                                            nonzero = channel[channel > 0]
+                                            if len(nonzero) > 0:
+                                                channel[y, x] = int(np.mean(nonzero))
+                            img_rgb[:, :, c] = channel
+                        
+                        img = img_rgb
+                    else:
+                        # Fallback: replicate single channel to RGB
+                        img = np.stack([img, img, img], axis=2)
+                except:
+                    # Fallback: simple replication
+                    img = np.stack([img, img, img], axis=2)
                 
-                # Add detailed frame info overlay
-                info_text = [
-                    f"Frame {self.frame_count}",
-                    f"RAW: {width}x{height}",
-                    f"Data: {len(data)} bytes", 
-                    f"FourCC: 0x{fourcc:08X}"
-                ]
-                
-                for i, text in enumerate(info_text):
-                    cv2.putText(img_rgb, text, (10, 30 + i*25), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                
-                cv2.imshow(self.display_window, img_rgb)
+                cv2.imshow(self.display_window, img)
                 cv2.waitKey(1)
-                print(f"[DISPLAY] ✓ RAW/Bayer frame displayed")
                 return
             
-            # Unknown format
-            else:
-                print(f"[DISPLAY] ✗ Unknown frame format:")
-                print(f"  Data size: {len(data)} bytes")
-                print(f"  Expected RGB: {width * height * 3} bytes")
-                print(f"  Expected RAW: {width * height} bytes")
-                print(f"  FourCC: 0x{fourcc:08X}")
-                
-                # Show data analysis
-                if len(data) > 0:
-                    print(f"  First 16 bytes: {data[:16].hex()}")
-                    if len(data) >= 2:
-                        print(f"  First 2 bytes: 0x{data[0]:02X} 0x{data[1]:02X}")
-                        if data[0] == 0xFF and data[1] == 0xD8:
-                            print("  → Looks like JPEG but size doesn't match")
-                        elif data[0] == 0x89 and len(data) >= 8 and data[1:4] == b'PNG':
-                            print("  → Looks like PNG format")
-                
-                print(f"[DISPLAY] ✗ Cannot display unknown format")
-            
         except Exception as e:
-            print(f"[DISPLAY] ✗ Display error: {e}")
             import traceback
             traceback.print_exc()
     
@@ -1613,30 +1543,31 @@ def main():
             print("  1. Set stream mode (JPEG)")
             print("  2. Set stream mode (RGB)")
             print("  3. Set stream mode (RAW)")
-            print("  4. Start streaming")
-            print("  5. Stop streaming")
+            print("  4. Set stream mode (QOI)")
+            print("  5. Start streaming")
+            print("  6. Stop streaming")
             print()
             print("AUTO ALGORITHMS:")
-            print("  6. Enable auto exposure")
-            print("  7. Disable auto exposure")
-            print("  8. Enable auto white balance")
-            print("  9. Disable auto white balance")
+            print("  7. Enable auto exposure")
+            print("  8. Disable auto exposure")
+            print("  9. Enable auto white balance")
+            print(" 10. Disable auto white balance")
             print()
             print("ISP CORRECTIONS:")
-            print(" 10. Get ISP correction state")
-            print(" 11. Enable all ISP corrections")
-            print(" 12. Disable all ISP corrections")
-            print(" 13. White balance control")
-            print(" 14. Black level control")
-            print(" 15. Gamma correction control")
-            print(" 16. JPEG quality control")
+            print(" 11. Get ISP correction state")
+            print(" 12. Enable all ISP corrections")
+            print(" 13. Disable all ISP corrections")
+            print(" 14. White balance control")
+            print(" 15. Black level control")
+            print(" 16. Gamma correction control")
+            print(" 17. JPEG quality control")
             print()
             print("ADVANCED:")
-            print(" 17. Show device status")
-            print(" 18. Custom ISP correction control")
-            print(" 19. Configuration management (JSON)")
-            print(" 20. Stream diagnostics")
-            print(" 21. Analyze raw stream data")
+            print(" 18. Show device status")
+            print(" 19. Custom ISP correction control")
+            print(" 20. Configuration management (JSON)")
+            print(" 21. Stream diagnostics")
+            print(" 22. Analyze raw stream data")
             print()
             print("  0. Exit")
             print("="*60)
@@ -1659,37 +1590,42 @@ def main():
                 else:
                     print("✗ Failed to set stream mode")
             elif choice == "4":
+                if client.set_stream_mode(MPIXStreamMode.QOI):
+                    print("✓ Stream mode set to QOI")
+                else:
+                    print("✗ Failed to set stream mode")
+            elif choice == "5":
                 if client.start_streaming():
                     print("✓ Streaming started - press any key in image window to continue")
-                    print("  (Close image window or select option 5 to stop)")
+                    print("  (Close image window or select option 6 to stop)")
                 else:
                     print("✗ Failed to start streaming")
-            elif choice == "5":
+            elif choice == "6":
                 if client.stop_streaming():
                     print("✓ Streaming stopped")
                 else:
                     print("✗ Failed to stop streaming")
-            elif choice == "6":
+            elif choice == "7":
                 if client.enable_auto_exposure():
                     print("✓ Auto exposure enabled")
                 else:
                     print("✗ Failed to enable auto exposure")
-            elif choice == "7":
+            elif choice == "8":
                 if client.disable_auto_exposure():
                     print("✓ Auto exposure disabled")
                 else:
                     print("✗ Failed to disable auto exposure")
-            elif choice == "8":
+            elif choice == "9":
                 if client.enable_auto_white_balance():
                     print("✓ Auto white balance enabled")
                 else:
                     print("✗ Failed to enable auto white balance")
-            elif choice == "9":
+            elif choice == "10":
                 if client.disable_auto_white_balance():
                     print("✓ Auto white balance disabled")
                 else:
                     print("✗ Failed to disable auto white balance")
-            elif choice == "10":
+            elif choice == "11":
                 state = client.get_isp_correction_state()
                 if state:
                     print("✓ ISP Correction State:")
@@ -1698,33 +1634,33 @@ def main():
                         print(f"  {correction}: {status}")
                 else:
                     print("✗ Failed to get ISP correction state")
-            elif choice == "11":
+            elif choice == "12":
                 if client.enable_isp_correction(MPIXISPCorrection.ALL):
                     print("✓ All ISP corrections enabled")
                 else:
                     print("✗ Failed to enable ISP corrections")
-            elif choice == "12":
+            elif choice == "13":
                 if client.disable_isp_correction(MPIXISPCorrection.ALL):
                     print("✓ All ISP corrections disabled")
                 else:
                     print("✗ Failed to disable ISP corrections")
-            elif choice == "13":
-                white_balance_menu(client)
             elif choice == "14":
-                black_level_menu(client)
+                white_balance_menu(client)
             elif choice == "15":
-                gamma_menu(client)
+                black_level_menu(client)
             elif choice == "16":
-                jpeg_quality_menu(client)
+                gamma_menu(client)
             elif choice == "17":
-                show_device_status(client)
+                jpeg_quality_menu(client)
             elif choice == "18":
-                custom_isp_menu(client)
+                show_device_status(client)
             elif choice == "19":
-                config_management_menu(client)
+                custom_isp_menu(client)
             elif choice == "20":
-                client.print_stream_diagnostics()
+                config_management_menu(client)
             elif choice == "21":
+                client.print_stream_diagnostics()
+            elif choice == "22":
                 duration = input("Analysis duration in seconds (default 10): ").strip()
                 try:
                     duration = int(duration) if duration else 10

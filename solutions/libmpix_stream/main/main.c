@@ -4,7 +4,6 @@
 #include "WE2_device.h"
 #include "WE2_core.h"
 #include "board.h"
-#include "xprintf.h"
 #include <mpix/sensor.h>
 #include <mpix/transport.h>
 #include <mpix/transport/uart.h>
@@ -14,16 +13,17 @@
 #include <mpix/stats.h>
 #include <mpix/auto.h>
 #include <mpix/op_correction.h>
-#include <mpix/op_kernel.h>
 #include <mpix/op_resize.h>
 #include <mpix/op_jpeg.h>
+#include <mpix/op_qoi.h>
 #include <mpix/port.h>
+#include <mpix/utils.h>
 #include "FreeRTOS.h"
 #include "task.h"
 
 /* Task configuration */
 #define PROTOCOL_TASK_STACK_SIZE (8192)
-#define CAMERA_TASK_STACK_SIZE (8192)
+#define CAMERA_TASK_STACK_SIZE (16384)
 #define PROTOCOL_TASK_PRIORITY (tskIDLE_PRIORITY + 3)
 #define CAMERA_TASK_PRIORITY (tskIDLE_PRIORITY + 2)
 
@@ -37,7 +37,7 @@ static void protocol_task(void *pvParameters)
 {
     (void)pvParameters;
 
-    xprintf("[PROTOCOL] Task started\n");
+        MPIX_INF("Protocol task started");
 
     uint32_t process_count = 0;
     uint32_t error_count = 0;
@@ -52,7 +52,7 @@ static void protocol_task(void *pvParameters)
 
         if (ret > 0)
         {
-            xprintf("[PROTOCOL] Processed command, bytes: %d\n", ret);
+            MPIX_DBG("Processed command, bytes: %d", ret);
             consecutive_errors = 0; /* Reset consecutive error count */
         }
         else if (ret == -EAGAIN)
@@ -103,13 +103,13 @@ static void protocol_task(void *pvParameters)
                 break;
             }
 
-            xprintf("[PROTOCOL] Error processing command: %d (%s), total errors: %d, consecutive: %d\n",
+            MPIX_ERR("Error processing command: %d (%s), total errors: %lu, consecutive: %lu",
                     ret, error_desc, error_count, consecutive_errors);
 
             /* If we have too many consecutive errors, try recovery measures */
             if (consecutive_errors >= 5)
             {
-                xprintf("[PROTOCOL] Too many consecutive errors, attempting recovery...\n");
+                MPIX_WRN("Too many consecutive errors, attempting recovery...");
 
                 /* Try to drain any remaining data from the transport */
                 if (g_protocol_ctx.transport)
@@ -127,7 +127,7 @@ static void protocol_task(void *pvParameters)
                     }
                     if (drain_count > 0)
                     {
-                        xprintf("[PROTOCOL] Drained %d bytes from transport buffer\n", drain_count);
+                        MPIX_DBG("Drained %d bytes from transport buffer", drain_count);
                     }
                 }
 
@@ -140,13 +140,13 @@ static void protocol_task(void *pvParameters)
         uint32_t current_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
         if (current_time - last_stats_time > 5000)
         {
-            xprintf("[PROTOCOL] Stats - Processed: %lu, Errors: %lu, Stream: %s\n",
+            MPIX_INF("Stats - Processed: %lu, Errors: %lu, Stream: %s",
                     process_count, error_count, g_protocol_ctx.streaming ? "ON" : "OFF");
 
             /* Also print transport status if available */
             if (g_protocol_ctx.transport)
             {
-                xprintf("[PROTOCOL] Transport status - RX ready: %s\n",
+                MPIX_DBG("Transport status - RX ready: %s",
                         mpix_transport_is_recv_ready(g_protocol_ctx.transport) ? "YES" : "NO");
             }
 
@@ -165,7 +165,7 @@ static void camera_task(void *pvParameters)
 {
     (void)pvParameters;
 
-    xprintf("[CAMERA] Task started\n");
+    MPIX_INF("Camera task started");
 
     struct mpix_image processed_image = {};
     
@@ -178,7 +178,7 @@ static void camera_task(void *pvParameters)
         // Fallback to default if we can't get format
         current_format.width = 640;
         current_format.height = 480;
-        xprintf("[CAMERA] WARNING: Could not get sensor format, using default 640x480\n");
+        MPIX_WRN("Could not get sensor format, using default 640x480");
     }
     
     // Calculate buffer size based on actual sensor format: width*height*3 for RGB24 (maximum size)
@@ -188,12 +188,12 @@ static void camera_task(void *pvParameters)
 
     if (!processed_image.buffer)
     {
-        xprintf("[CAMERA] ERROR: Failed to allocate image buffer\n");
+        MPIX_ERR("Failed to allocate image buffer");
         vTaskDelete(NULL);
         return;
     }
 
-    xprintf("[CAMERA] Image buffer allocated: %u bytes (%dx%dx3 RGB24)\n", 
+    MPIX_INF("Image buffer allocated: %u bytes (%dx%dx3 RGB24)", 
             image_buffer_size, current_format.width, current_format.height);
 
     uint32_t frame_count = 0;
@@ -217,7 +217,7 @@ static void camera_task(void *pvParameters)
             error_count++;
             if (error_count % 10 == 1)
             { /* Log every 10th error to avoid spam */
-                xprintf("[CAMERA] Frame timeout/error: %d (total errors: %d)\n", ret, error_count);
+                MPIX_WRN("Frame timeout/error: %d (total errors: %lu)", ret, error_count);
             }
             vTaskDelay(pdMS_TO_TICKS(200));
             continue;
@@ -228,7 +228,7 @@ static void camera_task(void *pvParameters)
         /* Log frame info occasionally */
         if (frame_count % 30 == 1)
         {
-            xprintf("[CAMERA] Frame %lu: %dx%d, size: %d, fourcc: 0x%x\n",
+            MPIX_DBG("Frame %lu: %dx%d, size: %d, fourcc: 0x%x",
                     frame_count, raw_image.width, raw_image.height, raw_image.size, raw_image.fourcc);
         }
 
@@ -237,14 +237,10 @@ static void camera_task(void *pvParameters)
 
         if (g_protocol_ctx.stream_mode != MPIX_STREAM_MODE_RAW)
         {
-            /* Copy raw image properties */
-            mpix_image_from_buf(&processed_image, raw_image.buffer, raw_image.size,
-                                raw_image.width, raw_image.height, raw_image.fourcc);
-
             /* Run auto algorithms if enabled */
             if (g_protocol_ctx.ae_enabled || g_protocol_ctx.awb_enabled || g_protocol_ctx.ablc_enabled)
             {
-                mpix_image_stats(&processed_image, &g_protocol_ctx.stats);
+                mpix_image_stats(&raw_image, &g_protocol_ctx.stats);
 
                 /* Run individual auto algorithms based on enable flags */
                 if (g_protocol_ctx.awb_enabled)
@@ -262,7 +258,7 @@ static void camera_task(void *pvParameters)
 
                 if (frame_count % 60 == 1)
                 { /* Log auto algorithm status every 60 frames */
-                    xprintf("[CAMERA] Auto algorithms - AE: %s, AWB: %s, ABLC: %s\n",
+                    MPIX_DBG("Auto algorithms - AE: %s, AWB: %s, ABLC: %s",
                             g_protocol_ctx.ae_enabled ? "ON" : "OFF",
                             g_protocol_ctx.awb_enabled ? "ON" : "OFF",
                             g_protocol_ctx.ablc_enabled ? "ON" : "OFF");
@@ -271,74 +267,87 @@ static void camera_task(void *pvParameters)
 
             /* Apply ISP corrections based on enable flags */
             if (g_protocol_ctx.black_level_correction_enabled) {
-                mpix_image_correction(&processed_image, MPIX_CORRECTION_BLACK_LEVEL,
+                mpix_image_correction(&raw_image, MPIX_CORRECTION_BLACK_LEVEL,
                                       (union mpix_correction_any *)&g_protocol_ctx.auto_ctrls.correction.black_level);
             }
             
             if (g_protocol_ctx.gamma_correction_enabled) {
-                mpix_image_correction(&processed_image, MPIX_CORRECTION_GAMMA,
+                mpix_image_correction(&raw_image, MPIX_CORRECTION_GAMMA,
                                       (union mpix_correction_any *)&g_protocol_ctx.auto_ctrls.correction.gamma);
             }
 
             /* Debayer to RGB */
-            mpix_image_debayer(&processed_image, 3);
+            mpix_image_debayer(&raw_image, 3);
 
             /* Apply more ISP corrections based on enable flags */
             if (g_protocol_ctx.white_balance_correction_enabled) {
-                mpix_image_correction(&processed_image, MPIX_CORRECTION_WHITE_BALANCE,
+                mpix_image_correction(&raw_image, MPIX_CORRECTION_WHITE_BALANCE,
                                       (union mpix_correction_any *)&g_protocol_ctx.auto_ctrls.correction.white_balance);
             }
             
             if (g_protocol_ctx.color_matrix_correction_enabled) {
-                mpix_image_correction(&processed_image, MPIX_CORRECTION_COLOR_MATRIX,
+                mpix_image_correction(&raw_image, MPIX_CORRECTION_COLOR_MATRIX,
                                       (union mpix_correction_any *)&g_protocol_ctx.auto_ctrls.correction.color_matrix);
             }
 
             /* Apply denoise filter based on enable flag */
             if (g_protocol_ctx.denoise_filter_enabled) {
-                mpix_image_kernel(&processed_image, MPIX_KERNEL_DENOISE, 3);
+                mpix_image_kernel(&raw_image, MPIX_KERNEL_DENOISE, 3);
             }
 
             /* Apply format-specific processing */
-            xprintf("[CAMERA] Current stream mode: %d\n", g_protocol_ctx.stream_mode);
+            MPIX_DBG("Current stream mode: %d", g_protocol_ctx.stream_mode);
             switch (g_protocol_ctx.stream_mode)
             {
             case MPIX_STREAM_MODE_RGB:
                 /* Keep as RGB */
                 if (frame_count % 60 == 1)
                 {
-                    xprintf("[CAMERA] Processing mode: RGB\n");
+                    MPIX_INF("Processing mode: RGB");
                 }
                 break;
 
             case MPIX_STREAM_MODE_JPEG:
                 /* Compress to JPEG */
-                mpix_image_jpeg_encode(&processed_image, JPEGE_Q_MED);
+                mpix_image_jpeg_encode(&raw_image, JPEGE_Q_MED);
                 if (frame_count % 60 == 1)
                 {
-                    xprintf("[CAMERA] Processing mode: JPEG\n");
+                    MPIX_INF("Processing mode: JPEG");
                 }
                 break;
 
             case MPIX_STREAM_MODE_AUTO:
                 /* Auto mode - use JPEG with auto algorithms */
-                mpix_image_jpeg_encode(&processed_image, JPEGE_Q_MED);
+                mpix_image_jpeg_encode(&raw_image, JPEGE_Q_MED);
                 if (frame_count % 60 == 1)
                 {
-                    xprintf("[CAMERA] Processing mode: AUTO\n");
+                    MPIX_INF("Processing mode: AUTO");
+                }
+                break;
+
+            case MPIX_STREAM_MODE_QOI:
+                /* Compress to QOI */
+                mpix_image_qoi_encode(&raw_image);
+                if (frame_count % 60 == 1)
+                {
+                    MPIX_INF("Processing mode: QOI");
                 }
                 break;
 
             default:
                 if (frame_count % 60 == 1)
                 {
-                    xprintf("[CAMERA] Processing mode: UNKNOWN (%d)\n", g_protocol_ctx.stream_mode);
+                    MPIX_WRN("Processing mode: UNKNOWN (%d)", g_protocol_ctx.stream_mode);
                 }
                 break;
             }
 
             /* Convert to output buffer */
-            mpix_image_to_buf(&processed_image, processed_image.buffer, image_buffer_size);
+            mpix_image_to_buf(&raw_image, processed_image.buffer, image_buffer_size);
+            processed_image.width = raw_image.width;
+            processed_image.height = raw_image.height;
+            processed_image.fourcc = raw_image.fourcc;
+            processed_image.size = raw_image.size;
             output_image = &processed_image;
         }
 
@@ -349,7 +358,7 @@ static void camera_task(void *pvParameters)
             g_protocol_ctx.error_counter++;
             if (g_protocol_ctx.error_counter % 10 == 1)
             { /* Log every 10th send error */
-                xprintf("[CAMERA] Send frame error: %d (total: %d)\n", ret, g_protocol_ctx.error_counter);
+                MPIX_ERR("Send frame error: %d (total: %d)", ret, g_protocol_ctx.error_counter);
             }
         }
 
@@ -361,7 +370,7 @@ static void camera_task(void *pvParameters)
         if (current_time - last_fps_time > 5000)
         {
             float fps = (float)(frame_count * 1000) / (current_time - last_fps_time + 1);
-            xprintf("[CAMERA] FPS: %d, Frames: %lu, Errors: %lu\n", (int)fps, frame_count, error_count);
+            MPIX_INF("FPS: %d, Frames: %lu, Errors: %lu", (int)fps, frame_count, error_count);
             frame_count = 0;
             error_count = 0;
             last_fps_time = current_time;
@@ -375,7 +384,7 @@ static void camera_task(void *pvParameters)
     if (processed_image.buffer)
     {
         mpix_port_free(processed_image.buffer);
-        xprintf("[CAMERA] Image buffer freed\n");
+        MPIX_INF("Image buffer freed");
     }
     vTaskDelete(NULL);
 }
@@ -383,7 +392,7 @@ static void camera_task(void *pvParameters)
 /* Initialize the system */
 static int system_init(void)
 {
-    xprintf("[INIT] Starting system initialization...\n");
+    MPIX_INF("Starting system initialization...");
 
     /* Initialize UART transport */
     struct mpix_transport_uart_config uart_cfg;
@@ -394,32 +403,32 @@ static int system_init(void)
     uart_cfg.send_buffer_size = 64 * 1024;
     uart_cfg.recv_buffer_size = 8 * 1024;
 
-    xprintf("[INIT] UART config - Port: %d, Baud: %d, TX buf: %d, RX buf: %d\n",
+    MPIX_INF("UART config - Port: %d, Baud: %d, TX buf: %d, RX buf: %d",
             uart_cfg.port_id, uart_cfg.baudrate, uart_cfg.send_buffer_size, uart_cfg.recv_buffer_size);
 
     if (mpix_transport_uart_create_with_config(&g_uart_transport, &uart_cfg) != 0)
     {
-        xprintf("[INIT] ERROR: UART transport create failed\n");
+        MPIX_ERR("UART transport create failed");
         return -1;
     }
-    xprintf("[INIT] UART transport created successfully\n");
+    MPIX_INF("UART transport created successfully");
 
     if (mpix_transport_init(&g_uart_transport) != 0)
     {
-        xprintf("[INIT] ERROR: UART transport init failed\n");
+        MPIX_ERR("UART transport init failed");
         return -1;
     }
-    xprintf("[INIT] UART transport initialized successfully\n");
+    MPIX_INF("UART transport initialized successfully");
 
     /* Probe sensor */
-    xprintf("[INIT] Probing camera sensor...\n");
+    MPIX_INF("Probing camera sensor...");
     struct mpix_sensor *sensor = sensor_probe();
     if (!sensor)
     {
-        xprintf("[INIT] ERROR: No camera sensor found\n");
+        MPIX_ERR("No camera sensor found");
         return -1;
     }
-    xprintf("[INIT] Camera sensor found and probed successfully\n");
+    MPIX_INF("Camera sensor found and probed successfully");
 
     /* Set default sensor format */
     struct mpix_sensor_format format = {
@@ -428,28 +437,28 @@ static int system_init(void)
         .height = 480,
         .fps = 30};
 
-    xprintf("[INIT] Setting sensor format: %dx%d @ %dfps, fourcc: 0x%x\n",
+    MPIX_INF("Setting sensor format: %dx%d @ %dfps, fourcc: 0x%x",
             format.width, format.height, format.fps, format.fourcc);
 
     if (mpix_sensor_set_format(sensor, &format) != 0)
     {
-        xprintf("[INIT] WARNING: Failed to set sensor format\n");
+        MPIX_WRN("Failed to set sensor format");
     }
     else
     {
-        xprintf("[INIT] Sensor format set successfully\n");
+        MPIX_INF("Sensor format set successfully");
     }
 
     /* Initialize protocol context */
-    xprintf("[INIT] Initializing protocol context...\n");
+    MPIX_INF("Initializing protocol context...");
     if (mpix_protocol_init(&g_protocol_ctx, sensor, &g_uart_transport) != 0)
     {
-        xprintf("[INIT] ERROR: Protocol init failed\n");
+        MPIX_ERR("Protocol init failed");
         return -1;
     }
-    xprintf("[INIT] Protocol context initialized successfully\n");
+    MPIX_INF("Protocol context initialized successfully");
 
-    xprintf("[INIT] System initialization completed successfully\n");
+    MPIX_INF("System initialization completed successfully");
     return 0;
 }
 
@@ -458,16 +467,17 @@ int main(void)
 {
     board_init();
 
-    xprintf("\n========================================\n");
-    xprintf("[BOOT] Starting MPIX Stream System...\n");
-    xprintf("[BOOT] Firmware Version: 1.0.0\n");
-    xprintf("[BOOT] Build Date: %s %s\n", __DATE__, __TIME__);
-    xprintf("========================================\n");
+    MPIX_INF("");
+    MPIX_INF("========================================");
+    MPIX_INF("Starting MPIX Stream System...");
+    MPIX_INF("Firmware Version: 1.0.0");
+    MPIX_INF("Build Date: %s %s", __DATE__, __TIME__);
+    MPIX_INF("========================================");
 
     /* Initialize the system */
     if (system_init() != 0)
     {
-        xprintf("[BOOT] ERROR: System initialization failed - system halted\n");
+        MPIX_ERR("System initialization failed - system halted");
         while (1)
         {
             board_delay_ms(1000);
@@ -475,43 +485,43 @@ int main(void)
     }
 
     /* Create protocol processing task */
-    xprintf("[BOOT] Creating protocol processing task...\n");
+    MPIX_INF("Creating protocol processing task...");
     BaseType_t res = xTaskCreate(protocol_task, "ProtocolTask", PROTOCOL_TASK_STACK_SIZE,
                                  NULL, PROTOCOL_TASK_PRIORITY, NULL);
     if (res != pdPASS)
     {
-        xprintf("[BOOT] ERROR: Failed to create ProtocolTask - system halted\n");
+        MPIX_ERR("Failed to create ProtocolTask - system halted");
         while (1)
         {
             board_delay_ms(1000);
         }
     }
-    xprintf("[BOOT] ProtocolTask created successfully\n");
+    MPIX_INF("ProtocolTask created successfully");
 
     /* Create camera streaming task */
-    xprintf("[BOOT] Creating camera streaming task...\n");
+    MPIX_INF("Creating camera streaming task...");
     res = xTaskCreate(camera_task, "CameraTask", CAMERA_TASK_STACK_SIZE,
                       NULL, CAMERA_TASK_PRIORITY, &g_camera_task_handle);
     if (res != pdPASS)
     {
-        xprintf("[BOOT] ERROR: Failed to create CameraTask - system halted\n");
+        MPIX_ERR("Failed to create CameraTask - system halted");
         while (1)
         {
             board_delay_ms(1000);
         }
     }
-    xprintf("[BOOT] CameraTask created successfully\n");
+    MPIX_INF("CameraTask created successfully");
 
-    xprintf("[BOOT] All tasks created, starting FreeRTOS scheduler...\n");
-    xprintf("[BOOT] Protocol UART: USE_DW_UART_1 @ 921600 baud\n");
-    xprintf("[BOOT] System ready for protocol communication\n");
-    xprintf("========================================\n");
+    MPIX_INF("All tasks created, starting FreeRTOS scheduler...");
+    MPIX_INF("Protocol UART: USE_DW_UART_1 @ 921600 baud");
+    MPIX_INF("System ready for protocol communication");
+    MPIX_INF("========================================");
 
     /* Start the scheduler */
     vTaskStartScheduler();
 
     /* Should never reach here */
-    xprintf("[BOOT] ERROR: Scheduler returned - system halted\n");
+    MPIX_ERR("Scheduler returned - system halted");
     while (1)
     {
         board_delay_ms(1000);
