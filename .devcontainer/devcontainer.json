@@ -1,0 +1,29 @@
+{
+	"name": "we2-devcontainer",
+	"build": {
+		"dockerfile": "Dockerfile"
+		// "context": "..",
+		// "args": {
+		// 	"USERNAME": "freddy",
+		// 	"USER_UID": "501",
+		// 	"USER_GID": "20"
+		// }
+	},
+	// // Bind the local workspace folder to /workspace in the container
+	// "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
+	// "workspaceFolder": "/workspace",
+	"runArgs": [
+		"--name",
+		"ubuntu-2510-arm"
+	],
+	// "remoteUser": "freddy",
+	// "updateRemoteUserUID": true,
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"ms-vscode.cpptools",
+				"ms-vscode.cmake-tools"
+			]
+		}
+	}
+}
