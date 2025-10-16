@@ -8,8 +8,8 @@ EPII_ROOT = .
 APPL ?= EPII_CM55M
 
 # Optimization Level
-OLEVEL ?= O2
-DEBUG ?= 1
+OLEVEL ?= Oz
+DEBUG ?= 0
 ##
 # Current Board And Core
 # BOARD: epii_fpga, epii_evb

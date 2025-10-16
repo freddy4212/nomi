@@ -58,7 +58,7 @@ cd sscma-example-we2
 ### 0x01
 
 ```sh
-make clean && make -j
+make clean && make TARGET=GROVE_VISION_AI_V2 -j8
 
 # the output elf is located at obj_epii_evb_icv30_bdv10/gnu_epii_evb_WLCSP65/EPII_CM55M_gnu_epii_evb_WLCSP65_s.elf
 ```
