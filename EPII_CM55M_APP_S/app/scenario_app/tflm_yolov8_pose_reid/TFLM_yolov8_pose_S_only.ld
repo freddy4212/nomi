@@ -10,8 +10,8 @@ MEMORY
   CM55M_S_SRAM (rwx) : ORIGIN = BOOT2NDLOADER_BASE, LENGTH = 0x00200000-(BOOT2NDLOADER_BASE-BASE_ADDR_SRAM0_ALIAS) /* 2M-0x1f000 bytes*/
 }
 
-__HEAP_SIZE = 0x2D000;  /* 184KB - original value */
-__STACK_SIZE = 0x3000;
+__HEAP_SIZE = 0x20000;  /* 128KB - Increased from 50KB */
+__STACK_SIZE = 0x5000; /* 20KB - Increased from 12KB */
 ENTRY(Reset_Handler)
 
 SECTIONS

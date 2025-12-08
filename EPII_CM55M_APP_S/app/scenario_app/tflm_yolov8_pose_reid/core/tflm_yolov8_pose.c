@@ -626,7 +626,7 @@ void SetPSAudVidonly()
 static void dp_app_cv_yolov8_pose_eventhdl_cb(EVT_INDEX_E event)
 {
 	uint16_t err;
-	int32_t read_status;
+	int32_t read_status = 0;
 
 	#if DBG_APP_LOG
 	dbg_printf(DBG_LESS_INFO, "EVT event = %d\n", event);
@@ -881,7 +881,7 @@ void app_start_state(APP_STATE_E state)
 		{
 
 			// if(cisdp_dp_init(true, SENSORDPLIB_PATH_INT_INP_HW5X5_JPEG, dp_app_cv_yolov8_pose_eventhdl_cb, 4, APP_DP_RES_RGB640x480_INP_SUBSAMPLE_2X) < 0)
-			if(cisdp_dp_init(true, SENSORDPLIB_PATH_INT_INP_HW5X5_JPEG, dp_app_cv_yolov8_pose_eventhdl_cb, 4, APP_DP_RES_RGB640x480_INP_SUBSAMPLE_1X) < 0)
+			if(cisdp_dp_init(true, SENSORDPLIB_PATH_INT_INP_HW5X5_JPEG, dp_app_cv_yolov8_pose_eventhdl_cb, 4, APP_DP_RES_RGB640x480_INP_SUBSAMPLE_2X) < 0)
 			{
 				xprintf("\r\nDATAPATH Init fail\r\n");
 				APP_BLOCK_FUNC();
@@ -894,7 +894,7 @@ void app_start_state(APP_STATE_E state)
 	{
 
 		
-		if(cisdp_dp_init(true, SENSORDPLIB_PATH_INT_INP_HW5X5_JPEG, dp_app_cv_yolov8_pose_eventhdl_cb, 4, APP_DP_RES_RGB640x480_INP_SUBSAMPLE_1X) < 0)
+		if(cisdp_dp_init(true, SENSORDPLIB_PATH_INT_INP_HW5X5_JPEG, dp_app_cv_yolov8_pose_eventhdl_cb, 4, APP_DP_RES_RGB640x480_INP_SUBSAMPLE_2X) < 0)
 		{
         	xprintf("\r\nDATAPATH Init fail\r\n");
         	APP_BLOCK_FUNC();

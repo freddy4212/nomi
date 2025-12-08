@@ -14,8 +14,8 @@ public:
                     uint8_t* dst, int x, int y, int crop_w, int crop_h);
     
     // 儲存為 PPM 格式
-    static void savePPM(const char* filename, const uint8_t* image, 
-                       int width, int height);
+    // static void savePPM(const char* filename, const uint8_t* image, 
+    //                    int width, int height);
 };
 
 // 取得 CPU cycle count (FVP專用)

@@ -1,3 +1,6 @@
+#ifndef SEND_RESULT_H
+#define SEND_RESULT_H
+
 
 #ifdef __cplusplus
 #include <cstring>
@@ -5,6 +8,8 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
+#include <string>
+#include <forward_list>
 #endif
 
 
@@ -189,3 +194,5 @@ void send_yolov8_pose_reid_results(
     const std::vector<std::vector<float>>& reid_vectors,
     el_img_t* img
 );
+
+#endif // SEND_RESULT_H

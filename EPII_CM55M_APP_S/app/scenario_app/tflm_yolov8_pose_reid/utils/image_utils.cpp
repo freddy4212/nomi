@@ -1,7 +1,7 @@
 #include "image_utils.h"
 #include <stdio.h>
 #include <string.h>
-#include "ff.h"
+// #include "ff.h"
 #include "xprintf.h"
 
 // ARM cycle counter
@@ -55,6 +55,7 @@ void ImageUtils::crop(const uint8_t* src, int src_w, int src_h,
     }
 }
 
+/*
 void ImageUtils::savePPM(const char* filename, const uint8_t* image,
                         int width, int height) {
     FIL fp;
@@ -74,3 +75,4 @@ void ImageUtils::savePPM(const char* filename, const uint8_t* image,
     f_close(&fp);
     xprintf("Saved %s\n", filename);
 }
+*/
