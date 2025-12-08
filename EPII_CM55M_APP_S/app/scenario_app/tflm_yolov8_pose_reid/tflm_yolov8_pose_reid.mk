@@ -13,6 +13,16 @@ APPL_DEFINES += -DUART_SEND_ALOGO_RESEULT
 #APPL_DEFINES += -DEVT_CM55MTIMER -DEVT_CM55MMB
 APPL_DEFINES += -DDBG_MORE
 
+# Uncomment the following line to enable SD card input for testing
+ENABLE_SD_TEST := 1
+
+ifdef ENABLE_SD_TEST
+APPL_DEFINES += -DUSE_SD_CARD_INPUT
+override SCENARIO_APP_SUPPORT_LIST += $(APP_TYPE)/sd_test_module
+# Ensure the directory is added to include paths
+APPL_INC_DIR += $(SCENARIO_APP_ROOT)/$(APP_TYPE)/sd_test_module
+endif
+
 EVENTHANDLER_SUPPORT = event_handler
 EVENTHANDLER_SUPPORT_LIST += evt_datapath
 

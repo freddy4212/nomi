@@ -32,6 +32,7 @@ void cisdp_get_jpginfo(uint32_t *jpeg_enc_filesize, uint32_t *jpeg_enc_addr);
 
 uint32_t app_get_jpeg_addr();
 uint32_t app_get_jpeg_sz();
+void app_set_jpeg_size(uint32_t size);
 uint32_t app_get_raw_addr();
 uint32_t app_get_raw_sz();
 uint32_t app_get_raw_width();

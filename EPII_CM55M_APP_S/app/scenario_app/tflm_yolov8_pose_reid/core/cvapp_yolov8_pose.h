@@ -19,6 +19,9 @@ int cv_yolov8_pose_init(bool security_enable, bool privilege_enable, uint32_t mo
 int cv_yolov8_pose_run(struct_yolov8_pose_algoResult *algoresult_yolov8_pose);
 
 int cv_yolov8_pose_deinit();
+
+int cv_yolov8_pose_reinit(void);
+
 #ifdef __cplusplus
 }
 #endif

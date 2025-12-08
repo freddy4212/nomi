@@ -756,6 +756,14 @@ uint32_t app_get_jpeg_sz()
 	return *((uint32_t*)g_jpegautofill_addr);
 }
 
+void app_set_jpeg_size(uint32_t size)
+{
+    if (g_jpegautofill_addr != 0) {
+        *((uint32_t*)g_jpegautofill_addr) = size;
+        hx_CleanDCache_by_Addr((volatile void *)g_jpegautofill_addr, 32);
+    }
+}
+
 uint32_t app_get_raw_addr()
 {
 	//raw data area BBBBBB/GGGGGG/RRRRRR

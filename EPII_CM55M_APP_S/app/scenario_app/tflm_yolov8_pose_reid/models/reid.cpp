@@ -15,8 +15,10 @@ extern TFLMRegistration* Register_ETHOSU();
 extern const char* GetString_ETHOSU();
 }
 
-#define REID_TENSOR_ARENA_SIZE (1340 * 1024)  // Increased to ~1.34MB to fit the model (Requested: 1365840)
-uint8_t reid_tensor_arena[REID_TENSOR_ARENA_SIZE] __attribute__((section(".tensor_arena"), aligned(16)));
+#define REID_TENSOR_ARENA_SIZE (1450 * 1024)  // Increased to ~1.45MB to fit 888x658 decoding
+extern "C" {
+    uint8_t reid_tensor_arena[REID_TENSOR_ARENA_SIZE] __attribute__((section(".tensor_arena"), aligned(16)));
+}
 
 ReIDMatcher::ReIDMatcher()
     : interpreter_(nullptr)

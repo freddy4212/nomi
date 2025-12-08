@@ -90,6 +90,10 @@ float yolov8_pose_bbox_dequant_value(int dims_cnt_1, int dims_cnt_2,TfLiteTensor
 	int value =  output->data.int8[ dims_cnt_2 + dims_cnt_1 * output->dims->data[2]];
 			
 	float deq_value = ((float) value-(float)((TfLiteAffineQuantization*)(output->quantization.params))->zero_point->data[0]) * ((TfLiteAffineQuantization*)(output->quantization.params))->scale->data[0];
+	
+    // FIX: YOLOv8 DFL outputs are raw logits/distributions. 
+    // Do NOT apply coordinate scaling or sigmoid here.
+    // The original code here was for YOLOv5/v7 style coordinates.
 	return deq_value;
 }
 
@@ -114,7 +118,7 @@ float yolov8_pose_key_pts_dequant_value(int dims_cnt_1, int dims_cnt_2,TfLiteTen
 	return deq_value;
 }
 
-void yolov8_pose_cal_xywh(int j,TfLiteTensor* output[7], box *bbox, float* anchor_756_2,float *stride_756_1, int *out_dim_size )
+void yolov8_pose_cal_xywh(int j,TfLiteTensor* output[7], box *bbox, float* anchor_756_2,float *stride_756_1, int *out_dim_size, int* box_indices )
 {
     float  xywh_result[4];
     //do DFL (softmax and than do conv2d)
@@ -128,17 +132,17 @@ void yolov8_pose_cal_xywh(int j,TfLiteTensor* output[7], box *bbox, float* ancho
 			float tmp_result = 0;
             if(j < out_dim_size[0])//576
             {
-                output_data_idx = 1;
+                output_data_idx = box_indices[0];
                 tmp_result = yolov8_pose_bbox_dequant_value(j, k*16+i,output[output_data_idx]);
             }
             else if(j < out_dim_size[1])//720
             {
-                output_data_idx = 0;
+                output_data_idx = box_indices[1];
                 tmp_result = yolov8_pose_bbox_dequant_value(j - out_dim_size[0], k*16+i,output[output_data_idx]);
             }
             else 
             {
-                output_data_idx = 5;
+                output_data_idx = box_indices[2];
                 tmp_result = yolov8_pose_bbox_dequant_value(j - out_dim_size[1], k*16+i,output[output_data_idx]);
             }
             tmp_arr_softmax_conv2d[i] = tmp_result;
@@ -168,6 +172,11 @@ void yolov8_pose_cal_xywh(int j,TfLiteTensor* output[7], box *bbox, float* ancho
     xywh_result[1] = cy * stride_756_1[j];
     xywh_result[2] = w * stride_756_1[j];
     xywh_result[3] = h * stride_756_1[j];
+
+    // Debug raw DFL outputs
+    // if (xywh_result[2] > 256 || xywh_result[3] > 256) {
+    //    xprintf("Large Box Raw: j=%d, stride=%f, w_grid=%f, h_grid=%f, w_px=%f, h_px=%f\n", j, stride_756_1[j], w, h, xywh_result[2], xywh_result[3]);
+    // }
 
     bbox->x = xywh_result[0] - (0.5 * xywh_result[2]);
     bbox->y = xywh_result[1] - (0.5 * xywh_result[3]);
@@ -202,110 +211,259 @@ void yolov8_pose_post_processing(
 	}
 	int output_data_idx = 0;
 
-	int out_dim_total = 0;
-	int numOutputs = static_interpreter->outputs_size();
-	int out_dim_size_num = (numOutputs - 1) / 2;
-	int out_dim_size[out_dim_size_num];
-	for(int out_num = 0; out_num < out_dim_size_num; out_num++)
-	{
-		if(out_num==0)
-		{
-			output_data_idx = 4;
-		}
-		else if(out_num==1)
-		{
-			output_data_idx = 6;
-		}
-		else
-		{
-			output_data_idx = 2;
-		}
-		out_dim_total += output[output_data_idx]->dims->data[1];
-		out_dim_size[out_num] = out_dim_total;
-	}
-	// ///////////////////////
-	// // start postprocessing
+// Auto-detect indices based on shapes (assuming 192x192 input -> 576, 144, 36)
+// If input size changes, these magic numbers need to be updated or calculated dynamically
+int idx_stride_8 = -1;  // 24x24 = 576
+int idx_stride_16 = -1; // 12x12 = 144
+int idx_stride_32 = -1; // 6x6 = 36
 
+// Box indices (64 channels)
+int idx_box_8 = -1;
+int idx_box_16 = -1;
+int idx_box_32 = -1;
 
-	std::vector<int> class_ids;
-	std::vector<float> confidences;
-	std::vector<box> boxes;
-	std::vector< struct_human_pose_17> kpts_vector;
+// Keypoint indices (51 channels)
+int idx_kpt_8 = -1;
+int idx_kpt_16 = -1;
+int idx_kpt_32 = -1;
 
-    // Optimization: Pre-calculate int8 thresholds to avoid dequantization and sigmoid for every anchor
-    float score_thresh_val = -logf(1.0f/modelScoreThreshold - 1.0f);
-    int8_t score_thresh_int8[3];
-    int indices[] = {4, 6, 2}; // The output indices used below
-    for(int i=0; i<3; i++) {
-        TfLiteAffineQuantization* quant = (TfLiteAffineQuantization*)(output[indices[i]]->quantization.params);
-        float scale = quant->scale->data[0];
-        float zero_point = quant->zero_point->data[0];
-        score_thresh_int8[i] = (int8_t)(score_thresh_val / scale + zero_point);
+int numOutputs = static_interpreter->outputs_size();
+for (int i = 0; i < numOutputs; i++) {
+    TfLiteTensor* t = static_interpreter->output(i);
+    if (t->dims->size >= 2) {
+        int dim1 = t->dims->data[1];
+        int channels = (t->dims->size > 2) ? t->dims->data[2] : 1;
+        
+        if (dim1 == 576) { // 192x192
+            if (channels == 1) idx_stride_8 = i;
+            else if (channels >= 64) idx_box_8 = i; 
+            else if (channels == 51) idx_kpt_8 = i;
+        }
+        else if (dim1 == 144) {
+            if (channels == 1) idx_stride_16 = i;
+            else if (channels >= 64) idx_box_16 = i;
+            else if (channels == 51) idx_kpt_16 = i;
+        }
+        else if (dim1 == 36) {
+            if (channels == 1) idx_stride_32 = i;
+            else if (channels >= 64) idx_box_32 = i;
+            else if (channels == 51) idx_kpt_32 = i;
+        }
+        else if (dim1 == 1024) { // 256x256
+            if (channels == 1) idx_stride_8 = i;
+            else if (channels >= 64) idx_box_8 = i;
+            else if (channels == 51) idx_kpt_8 = i;
+        }
+        else if (dim1 == 256) {
+            if (channels == 1) idx_stride_16 = i;
+            else if (channels >= 64) idx_box_16 = i;
+            else if (channels == 51) idx_kpt_16 = i;
+        }
+        else if (dim1 == 64) {
+            if (channels == 1) idx_stride_32 = i;
+            else if (channels >= 64) idx_box_32 = i;
+            else if (channels == 51) idx_kpt_32 = i;
+        }
+        else if (dim1 == 1344 || dim1 == 756) { // Concatenated keypoints (1024+256+64 or 576+144+36)
+            if (channels == 51) {
+                idx_kpt_8 = i;
+                idx_kpt_16 = i;
+                idx_kpt_32 = i;
+            }
+        }
     }
+}
 
-	for(int dims_cnt_1=0;dims_cnt_1<dim_total_size;dims_cnt_1++)
-	{
-		//////conferen ok
-		float maxScore = 0;
-        int8_t val_int8 = 0;
-        int thresh_idx = 0;
-        int relative_idx = 0;
+if (idx_stride_8 == -1 || idx_stride_16 == -1 || idx_stride_32 == -1) {
+    xprintf("[ERROR] Could not find YOLO Score tensors! Indices: S8=%d, S16=%d, S32=%d\n", idx_stride_8, idx_stride_16, idx_stride_32);
+    // Fallback to original hardcoded values if detection fails (though likely won't work)
+    if(idx_stride_8 == -1) idx_stride_8 = 4;
+    if(idx_stride_16 == -1) idx_stride_16 = 6;
+    if(idx_stride_32 == -1) idx_stride_32 = 2;
+} else {
+    xprintf("[INFO] Auto-detected YOLO Score indices: S8=%d, S16=%d, S32=%d\n", idx_stride_8, idx_stride_16, idx_stride_32);
+}
+    
+if (idx_box_8 == -1 || idx_box_16 == -1 || idx_box_32 == -1) {
+    xprintf("[ERROR] Could not find YOLO Box tensors! Indices: B8=%d, B16=%d, B32=%d\n", idx_box_8, idx_box_16, idx_box_32);
+    // Fallback
+    if(idx_box_8 == -1) idx_box_8 = 1;
+    if(idx_box_16 == -1) idx_box_16 = 0; 
+    if(idx_box_32 == -1) idx_box_32 = 5;
+} else {
+    xprintf("[INFO] Auto-detected YOLO Box indices: B8=%d, B16=%d, B32=%d\n", idx_box_8, idx_box_16, idx_box_32);
+}
 
-		float tmp_result = 0;
-		if(dims_cnt_1 < out_dim_size[0])//576
-		{
-			output_data_idx = 4;
-            thresh_idx = 0;
-            relative_idx = dims_cnt_1;
-            // Direct int8 access
-            val_int8 = output[output_data_idx]->data.int8[relative_idx * output[output_data_idx]->dims->data[2]];
-            
-            if (val_int8 < score_thresh_int8[thresh_idx]) continue; // Skip low confidence
+if (idx_kpt_8 == -1 || idx_kpt_16 == -1 || idx_kpt_32 == -1) {
+    xprintf("[ERROR] Could not find YOLO Keypoint tensors! Indices: K8=%d, K16=%d, K32=%d\n", idx_kpt_8, idx_kpt_16, idx_kpt_32);
+    // Fallback - assuming 3 was the only one used before, but now we need 3
+    if(idx_kpt_8 == -1) idx_kpt_8 = 3;
+    if(idx_kpt_16 == -1) idx_kpt_16 = 3; 
+    if(idx_kpt_32 == -1) idx_kpt_32 = 3; 
+} else {
+    xprintf("[INFO] Auto-detected YOLO Keypoint indices: K8=%d, K16=%d, K32=%d\n", idx_kpt_8, idx_kpt_16, idx_kpt_32);
+}
 
-			maxScore = sigmoid(yolov8_pose_bbox_dequant_value(relative_idx, 0,output[output_data_idx]));
-		}
-		else if(dims_cnt_1 < out_dim_size[1])//720
-		{
-			output_data_idx = 6;
-            thresh_idx = 1;
-            relative_idx = dims_cnt_1 - out_dim_size[0];
-            
-            val_int8 = output[output_data_idx]->data.int8[relative_idx * output[output_data_idx]->dims->data[2]];
-            if (val_int8 < score_thresh_int8[thresh_idx]) continue;
+int out_dim_total = 0;
+// int numOutputs = static_interpreter->outputs_size(); // Already declared
+int out_dim_size_num = 3; // We expect 3 scales
+int out_dim_size[out_dim_size_num];
+for(int out_num = 0; out_num < out_dim_size_num; out_num++)
+{
+    if(out_num==0)
+    {
+        output_data_idx = idx_stride_8;
+    }
+    else if(out_num==1)
+    {
+        output_data_idx = idx_stride_16;
+    }
+    else
+    {
+        output_data_idx = idx_stride_32;
+    }
+    out_dim_total += output[output_data_idx]->dims->data[1];
+    out_dim_size[out_num] = out_dim_total;
+}
+// ///////////////////////
+// // start postprocessing
 
-			maxScore = sigmoid(yolov8_pose_bbox_dequant_value(relative_idx, 0, output[output_data_idx]));
-		}
-		else 
-		{
-			output_data_idx = 2;
-            thresh_idx = 2;
-            relative_idx = dims_cnt_1 - out_dim_size[1];
 
-            val_int8 = output[output_data_idx]->data.int8[relative_idx * output[output_data_idx]->dims->data[2]];
-            if (val_int8 < score_thresh_int8[thresh_idx]) continue;
+std::vector<int> class_ids;
+std::vector<float> confidences;
+std::vector<box> boxes;
+std::vector< struct_human_pose_17> kpts_vector;
 
-			maxScore = sigmoid(yolov8_pose_bbox_dequant_value(relative_idx, 0,output[output_data_idx]));
-		}
-		// float maxScore = sigmoid(outputs_data_756_1[dims_cnt_2]);// the first four indexes are bbox information
+// Optimization: Pre-calculate int8 thresholds to avoid dequantization and sigmoid for every anchor
+float score_thresh_val = -logf(1.0f/modelScoreThreshold - 1.0f);
+int8_t score_thresh_int8[3];
+int indices[] = {idx_stride_8, idx_stride_16, idx_stride_32}; // The output indices used below
+int box_indices[] = {idx_box_8, idx_box_16, idx_box_32};
+int kpt_indices[] = {idx_kpt_8, idx_kpt_16, idx_kpt_32};
 
-		if (maxScore >= modelScoreThreshold)
-		{
-			box bbox;
-	
-			yolov8_pose_cal_xywh(dims_cnt_1, output, &bbox, anchor_756_2, stride_756_1,out_dim_size );
-			boxes.push_back(bbox);
-			confidences.push_back(maxScore);
-			
-			struct_human_pose_17 kpts;
-			for(int k = 0 ; k < 17 ; k++)
-			{
-				kpts.hpr[k].x = yolov8_pose_key_pts_dequant_value(dims_cnt_1,k*3 , output[3],anchor_756_2[dims_cnt_1 * 2 + 0],anchor_756_2[dims_cnt_1 * 2 + 1],stride_756_1[dims_cnt_1]);
-				kpts.hpr[k].y = yolov8_pose_key_pts_dequant_value(dims_cnt_1,k*3+1 , output[3],anchor_756_2[dims_cnt_1 * 2 + 0],anchor_756_2[dims_cnt_1 * 2 + 1],stride_756_1[dims_cnt_1]);
-				kpts.hpr[k].score = yolov8_pose_key_pts_dequant_value(dims_cnt_1,k*3+2 , output[3],anchor_756_2[dims_cnt_1 * 2 + 0],anchor_756_2[dims_cnt_1 * 2 + 1],stride_756_1[dims_cnt_1]);
-			}
-			kpts_vector.push_back(kpts);
-		}
-	}
+xprintf("Score Thresh Val: %d/1000 (Thresh=%d/1000)\n", (int)(score_thresh_val*1000), (int)(modelScoreThreshold*1000));
+for(int i=0; i<3; i++) {
+    TfLiteAffineQuantization* quant = (TfLiteAffineQuantization*)(output[indices[i]]->quantization.params);
+    float scale = quant->scale->data[0];
+    float zero_point = quant->zero_point->data[0];
+    float thresh_float = score_thresh_val / scale + zero_point;
+    if (thresh_float > 127.0f) thresh_float = 127.0f;
+    if (thresh_float < -128.0f) thresh_float = -128.0f;
+    score_thresh_int8[i] = (int8_t)thresh_float;
+    xprintf("Idx %d (Tensor %d): Scale=%d/1000, ZP=%d, Int8Thresh=%d\n", i, indices[i], (int)(scale*1000), (int)zero_point, score_thresh_int8[i]);
+}
+
+int pass_count = 0;
+float global_max_score = 0.0f;
+
+for(int dims_cnt_1=0;dims_cnt_1<dim_total_size;dims_cnt_1++)
+{
+    //////conferen ok
+    float maxScore = 0;
+    int8_t val_int8 = 0;
+    int thresh_idx = 0;
+    int relative_idx = 0;
+    int output_kpt_idx = 0;
+    int relative_idx_kpt = 0;
+
+    float tmp_result = 0;
+    if(dims_cnt_1 < out_dim_size[0])//576
+    {
+        output_data_idx = idx_stride_8;
+        thresh_idx = 0;
+        relative_idx = dims_cnt_1;
+        output_kpt_idx = idx_kpt_8;
+        
+        // If keypoints are concatenated (same tensor index for all strides), use absolute index
+        if (idx_kpt_8 == idx_kpt_16) relative_idx_kpt = dims_cnt_1;
+        else relative_idx_kpt = relative_idx;
+
+        // Direct int8 access
+        val_int8 = output[output_data_idx]->data.int8[relative_idx * output[output_data_idx]->dims->data[2]];
+        
+        // Debug: Check max score
+        // float current_score = sigmoid(yolov8_pose_bbox_dequant_value(relative_idx, 0,output[output_data_idx]));
+        // if (current_score > global_max_score) global_max_score = current_score;
+
+        if (val_int8 < score_thresh_int8[thresh_idx]) {
+             // Debug print for first few anchors
+             if (dims_cnt_1 < 5 || (dims_cnt_1 > out_dim_size[0] && dims_cnt_1 < out_dim_size[0] + 5)) {
+                 // xprintf("Skip: idx=%d, val=%d, thresh=%d\n", dims_cnt_1, val_int8, score_thresh_int8[thresh_idx]);
+             }
+             continue; // Skip low confidence
+        }
+
+        maxScore = sigmoid(yolov8_pose_bbox_dequant_value(relative_idx, 0,output[output_data_idx]));
+        
+        // Debug print
+        if (maxScore > 0.1f) {
+            xprintf("Candidate: idx=%d, score=%d/1000\n", dims_cnt_1, (int)(maxScore*1000));
+        }
+    }
+    else if(dims_cnt_1 < out_dim_size[1])//720
+    {
+        output_data_idx = idx_stride_16;
+        thresh_idx = 1;
+        relative_idx = dims_cnt_1 - out_dim_size[0];
+        output_kpt_idx = idx_kpt_16;
+        
+        if (idx_kpt_8 == idx_kpt_16) relative_idx_kpt = dims_cnt_1;
+        else relative_idx_kpt = relative_idx;
+
+        val_int8 = output[output_data_idx]->data.int8[relative_idx * output[output_data_idx]->dims->data[2]];
+        // float current_score = sigmoid(yolov8_pose_bbox_dequant_value(relative_idx, 0,output[output_data_idx]));
+        // if (current_score > global_max_score) global_max_score = current_score;
+
+        if (val_int8 < score_thresh_int8[thresh_idx]) continue;
+
+        maxScore = sigmoid(yolov8_pose_bbox_dequant_value(relative_idx, 0, output[output_data_idx]));
+        if (maxScore > 0.1f) {
+            xprintf("Candidate S16: idx=%d, score=%d/1000\n", dims_cnt_1, (int)(maxScore*1000));
+        }
+    }
+    else 
+    {
+        output_data_idx = idx_stride_32;
+        thresh_idx = 2;
+        relative_idx = dims_cnt_1 - out_dim_size[1];
+        output_kpt_idx = idx_kpt_32;
+
+        if (idx_kpt_8 == idx_kpt_16) relative_idx_kpt = dims_cnt_1;
+        else relative_idx_kpt = relative_idx;
+
+        val_int8 = output[output_data_idx]->data.int8[relative_idx * output[output_data_idx]->dims->data[2]];
+        // float current_score = sigmoid(yolov8_pose_bbox_dequant_value(relative_idx, 0,output[output_data_idx]));
+        // if (current_score > global_max_score) global_max_score = current_score;
+
+        if (val_int8 < score_thresh_int8[thresh_idx]) continue;
+
+        maxScore = sigmoid(yolov8_pose_bbox_dequant_value(relative_idx, 0,output[output_data_idx]));
+        if (maxScore > 0.1f) {
+            xprintf("Candidate S32: idx=%d, score=%d/1000\n", dims_cnt_1, (int)(maxScore*1000));
+        }
+    }
+    // float maxScore = sigmoid(outputs_data_756_1[dims_cnt_2]);// the first four indexes are bbox information
+
+    if (maxScore >= modelScoreThreshold)
+    {
+        pass_count++;
+        box bbox;
+    
+        yolov8_pose_cal_xywh(dims_cnt_1, output, &bbox, anchor_756_2, stride_756_1,out_dim_size, box_indices );
+        boxes.push_back(bbox);
+        confidences.push_back(maxScore);
+        
+        struct_human_pose_17 kpts;
+        for(int k = 0 ; k < 17 ; k++)
+        {
+            kpts.hpr[k].x = yolov8_pose_key_pts_dequant_value(relative_idx_kpt,k*3 , output[output_kpt_idx],anchor_756_2[dims_cnt_1 * 2 + 0],anchor_756_2[dims_cnt_1 * 2 + 1],stride_756_1[dims_cnt_1]);
+            kpts.hpr[k].y = yolov8_pose_key_pts_dequant_value(relative_idx_kpt,k*3+1 , output[output_kpt_idx],anchor_756_2[dims_cnt_1 * 2 + 0],anchor_756_2[dims_cnt_1 * 2 + 1],stride_756_1[dims_cnt_1]);
+            kpts.hpr[k].score = yolov8_pose_key_pts_dequant_value(relative_idx_kpt,k*3+2 , output[output_kpt_idx],anchor_756_2[dims_cnt_1 * 2 + 0],anchor_756_2[dims_cnt_1 * 2 + 1],stride_756_1[dims_cnt_1]);
+        }
+        kpts_vector.push_back(kpts);
+    }
+}
+    xprintf("Boxes passing threshold: %d\n", pass_count);
 
 	/**
 	 * do nms
@@ -324,15 +482,33 @@ void yolov8_pose_post_processing(
         float box_w = boxes[idx].w;
         float box_h = boxes[idx].h;
 
-        if(box_x < 0) box_x = 0;
-        if(box_y < 0) box_y = 0;
-        if(box_w < 0) box_w = 0;
-        if(box_h < 0) box_h = 0;
+        // Fix clamping logic to be intersection-based
+        float x1 = box_x;
+        float y1 = box_y;
+        float x2 = box_x + box_w;
+        float y2 = box_y + box_h;
 
-        if(box_x >= tensor_w) box_x = tensor_w;
-        if(box_y >= tensor_h) box_y = tensor_h;
-        if(box_w >= tensor_w) box_w = tensor_w;
-        if(box_h >= tensor_h) box_h = tensor_h;
+        // Debug large boxes
+        if (box_w > tensor_w || box_h > tensor_h) {
+            // xprintf("Large box detected: x=%d, y=%d, w=%d, h=%d\n", (int)box_x, (int)box_y, (int)box_w, (int)box_h);
+        }
+
+        if (x1 < 0) x1 = 0;
+        if (y1 < 0) y1 = 0;
+        if (x2 > tensor_w) x2 = tensor_w;
+        if (y2 > tensor_h) y2 = tensor_h;
+
+        // If box is completely outside, set to 0
+        if (x1 >= x2) { x1 = 0; x2 = 0; }
+        if (y1 >= y2) { y1 = 0; y2 = 0; }
+
+        box_x = x1;
+        box_y = y1;
+        box_w = x2 - x1;
+        box_h = y2 - y1;
+
+        // Debug: Print box details before final scaling
+        // xprintf("Box[%d]: x=%d, y=%d, w=%d, h=%d, score=%d/1000\n", i, (int)box_x, (int)box_y, (int)box_w, (int)box_h, (int)(confidences[idx]*1000));
 
         alg->dypr[i].bbox.x = (uint32_t)(box_x / (float)tensor_w * (float)img_w + 0.5f);
         alg->dypr[i].bbox.y = (uint32_t)(box_y / (float)tensor_h * (float)img_h + 0.5f);

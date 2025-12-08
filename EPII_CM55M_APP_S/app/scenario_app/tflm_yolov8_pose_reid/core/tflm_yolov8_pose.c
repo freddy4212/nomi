@@ -69,6 +69,11 @@
 #include "cvapp_yolov8_pose.h"
 #include "memory_manage.h"
 #include "hx_drv_watchdog.h"
+#ifdef USE_SD_CARD_INPUT
+#include "sd_card_helper.h"
+#endif
+
+// #define USE_SD_CARD_INPUT 1
 
 // #ifdef EPII_FPGA
 // #define DBG_APP_LOG             (1)
@@ -1008,12 +1013,63 @@ int tflm_yolov8_pose_app(void) {
 #ifdef EN_ALGO
 		cv_yolov8_pose_init(true, true, YOLOV8_POSE_FLASH_ADDR);
 #endif
+
+#ifdef USE_SD_CARD_INPUT
+        if (sd_card_init() != 0) {
+            xprintf("SD Card Init Failed\n");
+        } else {
+            xprintf("SD Card Init Success\n");
+        }
+
+        // Initialize datapath to reserve memory, but don't initialize sensor (false)
+        if(cisdp_dp_init(false, SENSORDPLIB_PATH_INT_INP_HW5X5_JPEG, dp_app_cv_yolov8_pose_eventhdl_cb, 4, APP_DP_RES_RGB640x480_INP_SUBSAMPLE_2X) < 0)
+        {
+            xprintf("\r\nDATAPATH Init fail\r\n");
+        }
+
+        // int frame_idx = 0;
+        char filename[64];
+
+        while(1) {
+            uint32_t raw_addr = app_get_raw_addr();
+            uint32_t width = app_get_raw_width();
+            uint32_t height = app_get_raw_height();
+            uint32_t channels = app_get_raw_channels();
+            uint32_t img_size = width * height * channels;
+
+            // Get next file from directory
+            int res = sd_card_get_next_file(filename, sizeof(filename));
+            
+            if (res == 0) {
+                // Found a file
+                if (sd_card_read_image(filename, (uint8_t*)raw_addr, img_size) == 0) {
+                    xprintf("Read %s success\n", filename);
+                    
+                    // Re-initialize YOLO interpreter because JPEG decoder used the shared arena
+                    cv_yolov8_pose_reinit();
+                    
+                    cv_yolov8_pose_run(&algoresult_yolov8_pose);
+                } else {
+                    xprintf("Read %s failed\n", filename);
+                }
+            } else {
+                // End of directory or error, loop will automatically restart from beginning of dir in next call
+                xprintf("End of directory, restarting sequence\n");
+                // Optional: Add delay before restarting
+                // hx_drv_timer_cm55x_delay_ms(1000, TIMER_STATE_DC);
+            }
+            
+            // Minimal delay to prevent tight loop if something goes wrong, or to control FPS
+            // hx_drv_timer_cm55x_delay_ms(10, TIMER_STATE_DC);
+        }
+#else
         while(1) {
     	    app_start_state(APP_STATE_YOLOV8_POSE);
             xprintf("app_start_state returned! Restarting...\n");
             cisdp_sensor_stop();
             hx_drv_timer_cm55x_delay_ms(1000, TIMER_STATE_DC);
         }
+#endif
 	}
 	return 0;
 }

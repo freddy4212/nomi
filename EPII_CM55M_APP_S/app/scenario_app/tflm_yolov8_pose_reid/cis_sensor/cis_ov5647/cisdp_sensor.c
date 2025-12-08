@@ -680,6 +680,12 @@ void cisdp_get_jpginfo(uint32_t *jpeg_enc_filesize, uint32_t *jpeg_enc_addr)
     //dbg_printf(DBG_LESS_INFO, "current frame_no=%d, jpeg_size=0x%x,addr=0x%x\n",frame_no,*jpeg_enc_filesize,*jpeg_enc_addr);
 }
 
+void app_set_jpeg_size(uint32_t size)
+{
+    *((uint32_t*)g_jpegautofill_addr) = size;
+    hx_CleanDCache_by_Addr((volatile void *)g_jpegautofill_addr, 32);
+}
+
 uint32_t app_get_jpeg_addr()
 {
     //EPII_InvalidateDCache_by_Addr(g_wdma2_baseaddr, 4);

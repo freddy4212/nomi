@@ -96,7 +96,7 @@ static ReIDMatcher* reid_matcher = &reid_matcher_static;
 
 using namespace std;
 
-extern uint8_t reid_tensor_arena[]; // Reuse ReID arena for YOLO to save memory
+extern "C" uint8_t reid_tensor_arena[]; // Reuse ReID arena for YOLO to save memory
 
 namespace {
 
@@ -104,7 +104,7 @@ namespace {
 // YOLO needs ~518KB, ReID needs ~1340KB
 // Total ~1858KB, fits in 1924KB SRAM if other data is moved to APP_DATA
 constexpr int yolo_tensor_arena_size = 520 * 1024;
-constexpr int reid_tensor_arena_size = 1340 * 1024;
+constexpr int reid_tensor_arena_size = 1450 * 1024;
 
 struct ethosu_driver ethosu_drv; /* Default Ethos-U device driver */
 tflite::MicroInterpreter *yolov8_pose_int_ptr=nullptr;
@@ -232,6 +232,19 @@ static bool setup_yolo_interpreter() {
         xprintf("Pose AllocateTensors failed\n");
         return false;
     }
+    
+    // Debug: Print tensor info
+    int num_outputs = yolov8_pose_int_ptr->outputs_size();
+    xprintf("Number of outputs: %d\n", num_outputs);
+    for (int i = 0; i < num_outputs; i++) {
+        TfLiteTensor* t = yolov8_pose_int_ptr->output(i);
+        xprintf("Output %d: type=%d, dims=[", i, t->type);
+        for (int j = 0; j < t->dims->size; j++) {
+            xprintf("%d%s", t->dims->data[j], j < t->dims->size - 1 ? "," : "");
+        }
+        xprintf("]\n");
+    }
+
     yolov8_pose_input = yolov8_pose_int_ptr->input(0);
     for(int i = 0;i < 7;i++)
     {
@@ -310,6 +323,11 @@ int cv_yolov8_pose_init(bool security_enable, bool privilege_enable, uint32_t mo
 	return ercode;
 }
 
+#ifdef USE_SD_CARD_INPUT
+extern "C" int g_sd_img_w;
+extern "C" int g_sd_img_h;
+#endif
+
 int cv_yolov8_pose_run(struct_yolov8_pose_algoResult *algoresult_yolov8_pose) {
 	int ercode = 0;
     static std::vector<std::vector<float>> cached_reid_vectors;
@@ -317,6 +335,12 @@ int cv_yolov8_pose_run(struct_yolov8_pose_algoResult *algoresult_yolov8_pose) {
     float h_scale;
     uint32_t img_w = app_get_raw_width();
     uint32_t img_h = app_get_raw_height();
+#ifdef USE_SD_CARD_INPUT
+    if (g_sd_img_w > 0 && g_sd_img_h > 0) {
+        img_w = g_sd_img_w;
+        img_h = g_sd_img_h;
+    }
+#endif
     uint32_t ch = app_get_raw_channels();
     uint32_t raw_addr = app_get_raw_addr();
     uint32_t expand = 0;
@@ -340,9 +364,15 @@ int cv_yolov8_pose_run(struct_yolov8_pose_algoResult *algoresult_yolov8_pose) {
         #if EACH_STEP_TICK
             SystemGetTick(&systick_1, &loop_cnt_1);
         #endif
+#ifdef USE_SD_CARD_INPUT
+		hx_lib_image_resize_helium((uint8_t*)raw_addr, (uint8_t*)yolov8_pose_input->data.data,  
+		                    img_w, img_h, ch, 
+                        	YOLOV8_POSE_INPUT_TENSOR_WIDTH, YOLOV8_POSE_INPUT_TENSOR_HEIGHT, w_scale,h_scale);
+#else
 		hx_lib_image_resize_BGR8U3C_to_RGB24_helium((uint8_t*)raw_addr, (uint8_t*)yolov8_pose_input->data.data,  
 		                    img_w, img_h, ch, 
                         	YOLOV8_POSE_INPUT_TENSOR_WIDTH, YOLOV8_POSE_INPUT_TENSOR_HEIGHT, w_scale,h_scale);
+#endif
 		#if EACH_STEP_TICK						
             SystemGetTick(&systick_2, &loop_cnt_2);
             xprintf("Tick for resize image BGR8U3C_to_RGB24_helium for yolov8 POSE:[%d]\r\n",(loop_cnt_2-loop_cnt_1)*CPU_CLK+(systick_1-systick_2));							
@@ -361,6 +391,9 @@ int cv_yolov8_pose_run(struct_yolov8_pose_algoResult *algoresult_yolov8_pose) {
             xprintf("Tick for Invoke for uint8toint8 for YOLOV8_POSE:[%d]\r\n\n",(loop_cnt_2-loop_cnt_1)*CPU_CLK+(systick_1-systick_2));    
         #endif	
 
+        // Debug: Print input tensor type and quantization
+        TfLiteAffineQuantization* input_quant = (TfLiteAffineQuantization*)(yolov8_pose_input->quantization.params);
+        xprintf("Input Tensor: Type=%d, ZP=%d, Scale=%f\n", yolov8_pose_input->type, input_quant->zero_point->data[0], input_quant->scale->data[0]);
 
         #if EACH_STEP_TICK
 		SystemGetTick(&systick_1, &loop_cnt_1);
@@ -394,7 +427,7 @@ int cv_yolov8_pose_run(struct_yolov8_pose_algoResult *algoresult_yolov8_pose) {
 
 		yolov8_pose_post_processing(
             yolov8_pose_int_ptr,
-            0.50, 
+            0.25, 
             0.45, 
             algoresult_yolov8_pose,
             el_keypoint_algo,
@@ -496,5 +529,13 @@ int cv_yolov8_pose_deinit()
 	free(stride_756_1);
 	free(anchor_756_2);
 	return 0;
+}
+
+int cv_yolov8_pose_reinit(void) {
+    if (!setup_yolo_interpreter()) {
+        xprintf("Failed to re-init YOLO interpreter\n");
+        return -1;
+    }
+    return 0;
 }
 
