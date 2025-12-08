@@ -312,7 +312,7 @@ int cv_yolov8_pose_init(bool security_enable, bool privilege_enable, uint32_t mo
 
 int cv_yolov8_pose_run(struct_yolov8_pose_algoResult *algoresult_yolov8_pose) {
 	int ercode = 0;
-    std::vector<std::vector<float>> reid_vectors;
+    static std::vector<std::vector<float>> cached_reid_vectors;
     float w_scale;
     float h_scale;
     uint32_t img_w = app_get_raw_width();
@@ -408,22 +408,32 @@ int cv_yolov8_pose_run(struct_yolov8_pose_algoResult *algoresult_yolov8_pose) {
         );
 
 #if ENABLE_REID_INFERENCE
-        run_reid_pipeline(
-            el_keypoint_algo,
-            raw_addr,
-            img_w,
-            img_h,
-            reid_matcher,
-            reid_input_buffer,
-            reid_vectors
-        );
+        bool people_detected = !el_keypoint_algo.empty();
+        
+        // Logic: Run ReID if:
+        // 1. People are detected AND
+        // 2. (It's a scheduled frame OR we don't have cached vectors yet)
+        if (people_detected) {
+            if (frame_count % 5 == 0 || cached_reid_vectors.empty()) {
+                cached_reid_vectors.clear(); // Clear old before new run
+                run_reid_pipeline(
+                    el_keypoint_algo,
+                    raw_addr,
+                    img_w,
+                    img_h,
+                    reid_matcher,
+                    reid_input_buffer,
+                    cached_reid_vectors
+                );
 
-        // Shared Arena: Restore YOLO interpreter for next frame
-        xprintf("Restoring YOLO interpreter...\n");
-        if (!setup_yolo_interpreter()) {
-            xprintf("Failed to restore YOLO interpreter!\n");
+                if (!setup_yolo_interpreter()) {
+                    xprintf("Failed to restore YOLO interpreter!\n");
+                }
+            }
+            // Else: reuse cached_reid_vectors
+        } else {
+            cached_reid_vectors.clear(); // No people, clear cache
         }
-
 #endif // ENABLE_REID_INFERENCE
 
 		#if EACH_STEP_TICK
@@ -464,7 +474,7 @@ if( g_trans_type == 0 || g_trans_type == 2)// transfer type is (UART) or (UART &
         frame_count,
         el_keypoint_algo,
         algoresult_yolov8_pose->algo_tick,
-        reid_vectors,
+        cached_reid_vectors,
         &temp_el_jpg_img
     );
 }

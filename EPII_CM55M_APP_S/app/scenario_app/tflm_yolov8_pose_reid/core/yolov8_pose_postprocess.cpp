@@ -232,26 +232,59 @@ void yolov8_pose_post_processing(
 	std::vector<box> boxes;
 	std::vector< struct_human_pose_17> kpts_vector;
 
+    // Optimization: Pre-calculate int8 thresholds to avoid dequantization and sigmoid for every anchor
+    float score_thresh_val = -logf(1.0f/modelScoreThreshold - 1.0f);
+    int8_t score_thresh_int8[3];
+    int indices[] = {4, 6, 2}; // The output indices used below
+    for(int i=0; i<3; i++) {
+        TfLiteAffineQuantization* quant = (TfLiteAffineQuantization*)(output[indices[i]]->quantization.params);
+        float scale = quant->scale->data[0];
+        float zero_point = quant->zero_point->data[0];
+        score_thresh_int8[i] = (int8_t)(score_thresh_val / scale + zero_point);
+    }
+
 	for(int dims_cnt_1=0;dims_cnt_1<dim_total_size;dims_cnt_1++)
 	{
 		//////conferen ok
 		float maxScore = 0;
+        int8_t val_int8 = 0;
+        int thresh_idx = 0;
+        int relative_idx = 0;
 
 		float tmp_result = 0;
 		if(dims_cnt_1 < out_dim_size[0])//576
 		{
 			output_data_idx = 4;
-			maxScore = sigmoid(yolov8_pose_bbox_dequant_value(dims_cnt_1, 0,output[output_data_idx]));
+            thresh_idx = 0;
+            relative_idx = dims_cnt_1;
+            // Direct int8 access
+            val_int8 = output[output_data_idx]->data.int8[relative_idx * output[output_data_idx]->dims->data[2]];
+            
+            if (val_int8 < score_thresh_int8[thresh_idx]) continue; // Skip low confidence
+
+			maxScore = sigmoid(yolov8_pose_bbox_dequant_value(relative_idx, 0,output[output_data_idx]));
 		}
 		else if(dims_cnt_1 < out_dim_size[1])//720
 		{
 			output_data_idx = 6;
-			maxScore = sigmoid(yolov8_pose_bbox_dequant_value(dims_cnt_1 - out_dim_size[0], 0, output[output_data_idx]));
+            thresh_idx = 1;
+            relative_idx = dims_cnt_1 - out_dim_size[0];
+            
+            val_int8 = output[output_data_idx]->data.int8[relative_idx * output[output_data_idx]->dims->data[2]];
+            if (val_int8 < score_thresh_int8[thresh_idx]) continue;
+
+			maxScore = sigmoid(yolov8_pose_bbox_dequant_value(relative_idx, 0, output[output_data_idx]));
 		}
 		else 
 		{
 			output_data_idx = 2;
-			maxScore = sigmoid(yolov8_pose_bbox_dequant_value(dims_cnt_1 - out_dim_size[1], 0,output[output_data_idx]));
+            thresh_idx = 2;
+            relative_idx = dims_cnt_1 - out_dim_size[1];
+
+            val_int8 = output[output_data_idx]->data.int8[relative_idx * output[output_data_idx]->dims->data[2]];
+            if (val_int8 < score_thresh_int8[thresh_idx]) continue;
+
+			maxScore = sigmoid(yolov8_pose_bbox_dequant_value(relative_idx, 0,output[output_data_idx]));
 		}
 		// float maxScore = sigmoid(outputs_data_756_1[dims_cnt_2]);// the first four indexes are bbox information
 
