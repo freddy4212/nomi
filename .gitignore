@@ -19,3 +19,5 @@ we2_image_gen_local/Images_ForSendData.txt
 we2_image_gen_local/Images.txt
 
 *.img
+
+EPII_CM55M_APP_S/prebuilt_libs/**

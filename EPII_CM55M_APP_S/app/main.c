@@ -405,3 +405,25 @@ int main(void)
 }
 #endif
 
+#ifdef GROVE_VISION_AI
+#include "grove_vision_ai.h"
+
+/** main entry */
+int main(void)
+{
+	board_init();
+	app_main();
+	return 0;
+}
+#endif
+
+#ifdef FAN_AT_CAM
+    #include "fan_at_cam.h"
+
+int main(void) {
+    board_init();
+    app_main();
+    return 0;
+}
+#endif
+

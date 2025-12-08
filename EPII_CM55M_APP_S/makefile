@@ -153,7 +153,8 @@ CUSTOMER ?= seeed
 # tflm_yolo11_od
 ##
 #APP_TYPE = allon_sensor_tflm
-APP_TYPE = sscma
+# APP_TYPE = sscma
+APP_TYPE = tflm_yolov8_pose_reid
  
 ### Options above must be added before include options.mk ###
 override EPII_ROOT := $(strip $(subst \,/,$(EPII_ROOT)))
