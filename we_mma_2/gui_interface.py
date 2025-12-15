@@ -50,13 +50,13 @@ try:
     from .reid_database import ReIDDatabase, get_reid_database
     from .serial_receiver import FrameData
     from .skeleton_processor import SkeletonFrame
-    from .visualizer import Visualizer
+    from .visualizer import SkeletonPlayer, Visualizer
 except ImportError:
     from config import config
     from reid_database import ReIDDatabase, get_reid_database
     from serial_receiver import FrameData
     from skeleton_processor import SkeletonFrame
-    from visualizer import Visualizer
+    from visualizer import SkeletonPlayer, Visualizer
 
 
 class GUIInterface:
@@ -84,9 +84,8 @@ class GUIInterface:
         self.tk_image = None
         self.image_item_id = None
         
-        # 補幀影像快取（用於 Interpolated 模式）
-        self.interpolated_buffer = []
-        self.interp_play_index = 0
+        # 補幀播放器
+        self.skeleton_player = SkeletonPlayer(None) # 這裡先傳入 None，稍後在 update_interpolated_frames 中更新
         self.interp_timer_id = None
         self.base_image_shape = (480, 640, 3)
         
@@ -905,7 +904,7 @@ class GUIInterface:
             skeleton_frames: 補幀後的骨架幀列表
         """
         if skeleton_frames:
-            self.interpolated_buffer = list(skeleton_frames)
+            self.skeleton_player.set_buffer(list(skeleton_frames))
             if self.interp_timer_id is None and self.cached_mode == "interpolated":
                 self._start_interpolated_playback()
     
@@ -913,7 +912,7 @@ class GUIInterface:
         """開始播放補幀動畫"""
         if self.interp_timer_id is not None:
             return
-        self.interp_play_index = 0
+        self.skeleton_player.reset()
         self._play_next_interpolated_frame()
     
     def _stop_interpolated_playback(self):
@@ -928,17 +927,13 @@ class GUIInterface:
             self.interp_timer_id = None
             return
         
-        if not self.interpolated_buffer:
+        frame = self.skeleton_player.get_next_frame()
+        
+        if not frame:
             self.interp_timer_id = self.root.after(67, self._play_next_interpolated_frame)
             return
         
         try:
-            # 防止循環播放：如果播放索引超過緩衝區長度，則停留在最後一幀
-            if self.interp_play_index >= len(self.interpolated_buffer):
-                self.interp_play_index = len(self.interpolated_buffer) - 1
-                
-            frame = self.interpolated_buffer[self.interp_play_index]
-            
             h, w = self.base_image_shape[:2]
             draw_img = np.zeros((h, w, 3), dtype=np.uint8)
             
@@ -958,13 +953,11 @@ class GUIInterface:
             
             self._display_image(pil_image)
             
-            self.interp_play_index += 1
-            
         except Exception as e:
             if config.debug:
                 print(f"[GUI] Interpolated playback error: {e}")
         
-        self.interp_timer_id = self.root.after(67, self._play_next_interpolated_frame)
+        self.interp_timer_id = self.root.after(33, self._play_next_interpolated_frame)
     
     def _on_mode_change(self, *args):
         """顯示模式變更"""

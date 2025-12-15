@@ -37,13 +37,13 @@ if __name__ == "__main__" or __package__ is None:
     from we_mma_2.config import config
     from we_mma_2.serial_receiver import FrameData
     from we_mma_2.skeleton_processor import SkeletonFrame, SkeletonProcessor
-    from we_mma_2.visualizer import Visualizer
+    from we_mma_2.visualizer import SkeletonPlayer, Visualizer
 else:
     from ..action_recognizer import ActionRecognizerAsync, ActionResult
     from ..config import config
     from ..serial_receiver import FrameData
     from ..skeleton_processor import SkeletonFrame, SkeletonProcessor
-    from ..visualizer import Visualizer
+    from ..visualizer import SkeletonPlayer, Visualizer
 
 
 # ============================================================
@@ -178,6 +178,7 @@ class WebcamActionApp:
         # 初始化共享模組
         self.pose_extractor = PoseExtractor()
         self.skeleton_processor = SkeletonProcessor()
+        self.skeleton_player = SkeletonPlayer(self.skeleton_processor)
         self.action_recognizer = ActionRecognizerAsync()
         
         # 狀態變數
@@ -199,10 +200,6 @@ class WebcamActionApp:
         self.display_output = None  # 用於儲存渲染後的畫面 (符合採樣率)
         self.current_skeleton_frame = None
         self.frame_count = 0
-        
-        # 補幀播放相關
-        self.interpolated_buffer = []
-        self.interp_play_index = 0
         
         # GUI 變數
         self.root = None
@@ -269,6 +266,7 @@ class WebcamActionApp:
         
         print(f"正在切換到攝像頭 {camera_id}...")
         self.skeleton_processor.clear()
+        self.skeleton_player.reset()
         self.current_action = "等待中..."
         self.stable_action = "等待中..."
         
@@ -340,9 +338,6 @@ class WebcamActionApp:
                 
                 # 3. 骨架處理 (補幀、平滑)
                 self.current_skeleton_frame = self.skeleton_processor.process_frame(frame_data)
-                
-                # 更新補幀緩衝區
-                self.interpolated_buffer = self.skeleton_processor.get_interpolated_frames()
                 
                 # 4. 動作識別
                 self._try_action_recognition()
@@ -461,17 +456,8 @@ class WebcamActionApp:
             # Interpolated 視圖：顯示補幀結果（流暢播放）
             output = np.zeros((h, w, 3), dtype=np.uint8)
             
-            target_frame = None
-            if self.interpolated_buffer:
-                # 防止循環播放：如果播放索引超過緩衝區長度，則停留在最後一幀
-                if self.interp_play_index >= len(self.interpolated_buffer):
-                    self.interp_play_index = len(self.interpolated_buffer) - 1
-                
-                target_frame = self.interpolated_buffer[self.interp_play_index]
-                # 更新索引以便下一幀播放下一張 (30 FPS)
-                self.interp_play_index += 1
-            elif self.current_skeleton_frame:
-                target_frame = self.current_skeleton_frame
+            # 使用 SkeletonPlayer 獲取下一幀
+            target_frame = self.skeleton_player.get_next_frame()
             
             if target_frame:
                 for person in target_frame.persons:
@@ -575,6 +561,7 @@ class WebcamActionApp:
 
     def reset_buffer(self):
         self.skeleton_processor.clear()
+        self.skeleton_player.reset()
         self.current_action = "等待中..."
         self.stable_action = "等待中..."
         print("緩衝區已重置")

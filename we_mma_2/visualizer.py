@@ -146,3 +146,67 @@ class Visualizer:
         cv2.putText(output, f"Action: {info.get('action', 'N/A')}", (20, 110), font, 0.5, (0, 255, 0), 1)
         
         return output
+
+
+class SkeletonPlayer:
+    """
+    骨架序列播放器 - 負責管理補幀緩衝區的播放進度
+    包含智慧播放速度控制邏輯，確保畫面流暢
+    """
+    def __init__(self, processor=None):
+        self.processor = processor
+        self.buffer = [] # 內部緩衝區 (當沒有 processor 時使用)
+        self.play_index = 0.0
+        
+    def set_buffer(self, buffer):
+        """手動設置緩衝區 (當沒有 processor 時使用)"""
+        self.buffer = buffer
+        
+    def get_next_frame(self):
+        """
+        獲取下一幀要顯示的骨架幀
+        
+        Returns:
+            SkeletonFrame or None
+        """
+        if self.processor:
+            buffer = self.processor.get_interpolated_frames()
+        else:
+            buffer = self.buffer
+            
+        if not buffer:
+            return None
+            
+        buffer_len = len(buffer)
+        
+        # 如果播放索引超過緩衝區長度，則停留在最後一幀
+        if self.play_index >= buffer_len:
+            self.play_index = float(buffer_len - 1)
+        
+        # 獲取當前幀
+        try:
+            target_frame = buffer[int(self.play_index)]
+        except IndexError:
+            target_frame = buffer[-1]
+            self.play_index = float(buffer_len - 1)
+            
+        # 智慧播放速度控制
+        # 如果緩衝區很滿 (>15幀)，全速播放 (1.2x)
+        # 如果緩衝區快空了 (<5幀)，減速播放 (0.5x) 以等待下一批幀
+        remaining = buffer_len - self.play_index
+        
+        if remaining < 5:
+            step = 0.5
+        elif remaining > 15:
+            step = 1.2
+        else:
+            step = 1.0
+            
+        self.play_index += step
+        
+        return target_frame
+    
+    def reset(self):
+        """重置播放狀態"""
+        self.play_index = 0.0
+
