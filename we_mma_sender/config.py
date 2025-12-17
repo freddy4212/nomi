@@ -15,10 +15,11 @@ from typing import List
 
 @dataclass
 class NetworkConfig:
-    """網路傳送配置"""
-    host: str = "127.0.0.1"
-    port: int = 9527
+    """網路傳送配置（Client 模式，連接到 receiver）"""
+    receiver_host: str = "127.0.0.1"  # receiver 的 IP
+    receiver_port: int = 9527          # receiver 監聽的 port
     buffer_size: int = 65536
+    reconnect_interval: float = 2.0    # 重連間隔（秒）
 
 
 @dataclass

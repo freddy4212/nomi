@@ -33,31 +33,36 @@ if __name__ == "__main__" or __package__ is None:
     from we_mma_sender.gui_interface import SenderGUIInterface
     from we_mma_sender.sources.serial_source import FrameData, SerialSource
     from we_mma_sender.sources.webcam_source import WebcamSource
+    from we_mma_sender.sources.wifi_source import WiFiSource
 else:
     from .config import config
     from .gui_interface import SenderGUIInterface
     from .sources.serial_source import FrameData, SerialSource
     from .sources.webcam_source import WebcamSource
+    from .sources.wifi_source import WiFiSource
 
 
 class NetworkSender:
-    """網路資料發送器（TCP Server 模式）"""
+    """網路資料發送器（TCP Client 模式，主動連接到 receiver）"""
     
     def __init__(self):
-        self.server_socket: Optional[socket.socket] = None
-        self.client_socket: Optional[socket.socket] = None
+        self.socket: Optional[socket.socket] = None
         self.is_running: bool = False
+        self.is_connected: bool = False
         self.stop_event = threading.Event()
         
         # 執行緒
-        self.accept_thread: Optional[threading.Thread] = None
+        self.connect_thread: Optional[threading.Thread] = None
         
         # 回調
-        self.on_client_connected: Optional[callable] = None
-        self.on_client_disconnected: Optional[callable] = None
+        self.on_connection_changed: Optional[callable] = None
         
         # 統計
         self.sent_count: int = 0
+        
+        # 連接參數
+        self.receiver_host = config.network.receiver_host
+        self.receiver_port = config.network.receiver_port
         
     def debug_log(self, msg: str):
         """除錯日誌"""
@@ -65,108 +70,103 @@ class NetworkSender:
             print(f"[NetworkSender][{time.time():.3f}] {msg}")
     
     def start(self) -> bool:
-        """啟動伺服器"""
-        try:
-            self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            self.server_socket.bind((config.network.host, config.network.port))
-            self.server_socket.listen(1)
-            self.server_socket.settimeout(1.0)
-            
-            self.is_running = True
-            self.stop_event.clear()
-            
-            # 啟動接受連接執行緒
-            self.accept_thread = threading.Thread(target=self._accept_loop, daemon=True)
-            self.accept_thread.start()
-            
-            self.debug_log(f"Server started on {config.network.host}:{config.network.port}")
+        """啟動連接執行緒"""
+        if self.is_running:
             return True
-            
-        except Exception as e:
-            self.debug_log(f"Server start failed: {e}")
-            return False
+        
+        self.is_running = True
+        self.stop_event.clear()
+        
+        # 啟動連接執行緒
+        self.connect_thread = threading.Thread(target=self._connect_loop, daemon=True)
+        self.connect_thread.start()
+        
+        self.debug_log(f"NetworkSender started, will connect to {self.receiver_host}:{self.receiver_port}")
+        return True
     
     def stop(self):
-        """停止伺服器"""
+        """停止連接"""
         self.is_running = False
         self.stop_event.set()
-        
-        if self.client_socket:
-            try:
-                self.client_socket.close()
-            except:
-                pass
-            self.client_socket = None
-        
-        if self.server_socket:
-            try:
-                self.server_socket.close()
-            except:
-                pass
-            self.server_socket = None
-        
-        self.debug_log("Server stopped")
+        self._disconnect()
+        self.debug_log("NetworkSender stopped")
     
-    def _accept_loop(self):
-        """接受連接執行緒"""
-        self.debug_log("Accept loop started")
+    def _connect(self) -> bool:
+        """嘗試連接到 receiver"""
+        try:
+            self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.socket.settimeout(5.0)
+            self.socket.connect((self.receiver_host, self.receiver_port))
+            self.socket.settimeout(5.0)  # 發送超時
+            self.is_connected = True
+            self.debug_log(f"Connected to receiver at {self.receiver_host}:{self.receiver_port}")
+            
+            if self.on_connection_changed:
+                self.on_connection_changed(True)
+            
+            return True
+        except Exception as e:
+            self.debug_log(f"Connection to receiver failed: {e}")
+            self._disconnect()
+            return False
+    
+    def _disconnect(self):
+        """斷開連接"""
+        if self.socket:
+            try:
+                self.socket.close()
+            except:
+                pass
+            self.socket = None
+        
+        was_connected = self.is_connected
+        self.is_connected = False
+        
+        if was_connected and self.on_connection_changed:
+            self.on_connection_changed(False)
+    
+    def _connect_loop(self):
+        """持續嘗試連接的執行緒"""
+        self.debug_log("Connect loop started")
         
         while not self.stop_event.is_set() and self.is_running:
-            try:
-                client, addr = self.server_socket.accept()
-                self.debug_log(f"Client connected: {addr}")
-                
-                # 關閉舊連接
-                if self.client_socket:
-                    try:
-                        self.client_socket.close()
-                    except:
-                        pass
-                
-                self.client_socket = client
-                self.client_socket.settimeout(5.0)
-                
-                if self.on_client_connected:
-                    self.on_client_connected()
-                    
-            except socket.timeout:
-                continue
-            except Exception as e:
-                if self.is_running:
-                    self.debug_log(f"Accept error: {e}")
+            if not self.is_connected:
+                if not self._connect():
+                    # 等待後重試
+                    time.sleep(config.network.reconnect_interval)
+            else:
+                # 已連接，等待一下再檢查
+                time.sleep(0.5)
         
-        self.debug_log("Accept loop ended")
+        self._disconnect()
+        self.debug_log("Connect loop ended")
     
     def send(self, data: Dict[str, Any]) -> bool:
-        """發送資料"""
-        if not self.client_socket:
+        """發送資料到 receiver"""
+        if not self.is_connected or not self.socket:
             return False
         
         try:
             json_str = json.dumps(data, ensure_ascii=False)
             message = (json_str + '\n').encode('utf-8')
-            self.client_socket.sendall(message)
+            self.socket.sendall(message)
             self.sent_count += 1
             return True
             
         except Exception as e:
             self.debug_log(f"Send error: {e}")
-            
-            if self.on_client_disconnected:
-                self.on_client_disconnected()
-            
-            try:
-                self.client_socket.close()
-            except:
-                pass
-            self.client_socket = None
-            
+            self._disconnect()
             return False
     
-    def is_client_connected(self) -> bool:
-        """檢查客戶端是否已連接"""
-        return self.client_socket is not None
+    def is_receiver_connected(self) -> bool:
+        """檢查是否已連接到 receiver"""
+        return self.is_connected
+    
+    def get_connection_info(self) -> str:
+        """獲取連接資訊"""
+        if self.is_connected:
+            return f"→ {self.receiver_host}:{self.receiver_port}"
+        return f"等待連接 {self.receiver_host}:{self.receiver_port}..."
 
 
 class WE_MMA_Sender_App:
@@ -188,6 +188,7 @@ class WE_MMA_Sender_App:
         # 資料來源
         self.serial_source: Optional[SerialSource] = None
         self.webcam_source: Optional[WebcamSource] = None
+        self.wifi_source: Optional[WiFiSource] = None
         
         # 當前來源
         self.current_source = "wifi"
@@ -202,8 +203,7 @@ class WE_MMA_Sender_App:
         self._setup_gui_callbacks()
         
         # 設定網路發送器回調
-        self.network_sender.on_client_connected = self._on_client_connected
-        self.network_sender.on_client_disconnected = self._on_client_disconnected
+        self.network_sender.on_connection_changed = self._on_receiver_connection_changed
         
         # Webcam 預覽更新 ID
         self.webcam_preview_id = None
@@ -236,15 +236,13 @@ class WE_MMA_Sender_App:
         self.gui.on_webcam_reid_toggle = self._on_webcam_reid_toggle
         self.gui.on_webcam_yolo_change = self._on_webcam_yolo_change
     
-    def _on_client_connected(self):
-        """客戶端連接回調"""
-        self.root.after(0, self.gui.update_client_status, True)
-        self.debug_log("Client connected")
-    
-    def _on_client_disconnected(self):
-        """客戶端斷開回調"""
-        self.root.after(0, self.gui.update_client_status, False)
-        self.debug_log("Client disconnected")
+    def _on_receiver_connection_changed(self, connected: bool):
+        """Receiver 連接狀態變更回調"""
+        self.root.after(0, self.gui.update_client_status, connected)
+        if connected:
+            self.debug_log("Connected to receiver")
+        else:
+            self.debug_log("Disconnected from receiver")
     
     def _on_source_changed(self, source: str):
         """來源變更回調"""
@@ -258,14 +256,26 @@ class WE_MMA_Sender_App:
     # ===== WiFi 來源 =====
     
     def _on_wifi_start(self) -> bool:
-        """WiFi 開始"""
-        # WiFi 目前只是佔位符，實際功能待實作
-        self.debug_log("WiFi source started (placeholder)")
-        return True
+        """WiFi 開始監聽"""
+        self.wifi_source = WiFiSource(on_frame_received=self._on_frame_received)
+        self.wifi_source.on_connection_changed = self._on_wifi_connection_changed
+        success = self.wifi_source.start()
+        
+        if success:
+            self.debug_log(f"WiFi listening on {config.wifi.listen_host}:{config.wifi.listen_port}")
+        
+        return success
     
     def _on_wifi_stop(self):
-        """WiFi 停止"""
+        """WiFi 停止監聽"""
+        if self.wifi_source:
+            self.wifi_source.stop()
+            self.wifi_source = None
         self.debug_log("WiFi source stopped")
+    
+    def _on_wifi_connection_changed(self, connected: bool):
+        """WiFi 連接狀態變更回調"""
+        self.root.after(0, self.gui.update_wifi_connection_status, connected)
     
     # ===== Serial 來源 =====
     
@@ -413,7 +423,7 @@ class WE_MMA_Sender_App:
         send_data = self._create_send_data(frame_data)
         
         # 發送到接收端
-        if self.network_sender.is_client_connected():
+        if self.network_sender.is_receiver_connected():
             success = self.network_sender.send(send_data)
             if success:
                 self.root.after(0, self.gui.update_send_status, 
@@ -509,10 +519,11 @@ def main():
     print("  WE_MMA_Sender - 骨架資料網路發射端")
     print("=" * 50)
     print()
-    print(f"  伺服器位址: {config.network.host}:{config.network.port}")
+    print(f"  Receiver 位址: {config.network.receiver_host}:{config.network.receiver_port}")
+    print(f"  WiFi 監聽埠: {config.wifi.listen_port}")
     print()
     print("  支援的資料來源:")
-    print("  - 📡 WiFi: 接收 WiseEye2 的 WiFi 傳輸")
+    print("  - 📡 WiFi: 接收 ESP32/WiseEye2 的 WiFi 傳輸 (port {})".format(config.wifi.listen_port))
     print("  - 🔌 Serial: 接收 WiseEye2 的串口傳輸")
     print("  - 📷 Webcam: 使用電腦攝像頭模擬")
     print()

@@ -14,7 +14,8 @@ from typing import Optional
 @dataclass
 class NetworkConfig:
     """網路連接配置"""
-    host: str = "127.0.0.1"
+    mode: str = "server"  # "server" 或 "client"
+    host: str = "0.0.0.0"  # Server 模式下綁定的地址，Client 模式下連接的目標
     port: int = 9527
     buffer_size: int = 65536
     reconnect_interval: float = 2.0  # 重連間隔（秒）

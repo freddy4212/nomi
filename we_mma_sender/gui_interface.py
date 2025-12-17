@@ -106,11 +106,11 @@ class SenderGUIInterface:
         top_frame = ttk.Frame(self.root, padding=5)
         top_frame.pack(fill=tk.X)
         
-        # 伺服器資訊
-        ttk.Label(top_frame, text="Target Server:").pack(side=tk.LEFT, padx=5)
+        # Receiver 連接資訊
+        ttk.Label(top_frame, text="Receiver:").pack(side=tk.LEFT, padx=5)
         self.lbl_server = ttk.Label(
             top_frame, 
-            text=f"{config.network.host}:{config.network.port}",
+            text=f"{config.network.receiver_host}:{config.network.receiver_port}",
             font=("Helvetica", 12, "bold")
         )
         self.lbl_server.pack(side=tk.LEFT, padx=5)
@@ -119,7 +119,7 @@ class SenderGUIInterface:
         ttk.Separator(top_frame, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=15)
         
         # 連接狀態
-        ttk.Label(top_frame, text="Client:").pack(side=tk.LEFT, padx=5)
+        ttk.Label(top_frame, text="狀態:").pack(side=tk.LEFT, padx=5)
         self.lbl_client_status = ttk.Label(top_frame, text="● 等待連接", foreground="gray")
         self.lbl_client_status.pack(side=tk.LEFT, padx=5)
         
@@ -430,12 +430,12 @@ class SenderGUIInterface:
             if self.on_wifi_start and self.on_wifi_start():
                 self.is_sending = True
                 self.btn_wifi_start.config(text="⏹ 停止監聽")
-                self.lbl_wifi_status.config(text="狀態：監聽中...", foreground="green")
+                self.lbl_wifi_status.config(text="狀態：等待 ESP32 連接...", foreground="orange")
         else:
             if self.on_wifi_stop:
                 self.on_wifi_stop()
             self.is_sending = False
-            self.btn_wifi_start.config(text="▶ 開始監聽")
+            self.btn_wifi_start.config(text="▶ 開始監聯")
             self.lbl_wifi_status.config(text="狀態：已停止", foreground="gray")
     
     def _on_refresh_serial_ports(self):
@@ -547,10 +547,10 @@ class SenderGUIInterface:
     # ===== 公開方法 =====
     
     def update_client_status(self, connected: bool):
-        """更新客戶端連接狀態"""
+        """更新 Receiver 連接狀態"""
         self.client_connected = connected
         if connected:
-            self.lbl_client_status.config(text="● 已連接", foreground="green")
+            self.lbl_client_status.config(text="● 已連接 Receiver", foreground="green")
         else:
             self.lbl_client_status.config(text="● 等待連接", foreground="gray")
     
@@ -562,6 +562,13 @@ class SenderGUIInterface:
         """更新 WiFi 統計"""
         self.lbl_wifi_frames.config(text=f"接收幀數：{frames}")
         self.lbl_wifi_fps.config(text=f"接收 FPS：{fps:.1f}")
+    
+    def update_wifi_connection_status(self, connected: bool):
+        """更新 WiFi ESP32 連接狀態"""
+        if connected:
+            self.lbl_wifi_status.config(text="狀態：ESP32 已連接", foreground="green")
+        else:
+            self.lbl_wifi_status.config(text="狀態：等待 ESP32 連接...", foreground="orange")
     
     def update_serial_stats(self, frames: int, fps: float, device_info: Dict = None):
         """更新 Serial 統計"""

@@ -37,7 +37,7 @@ class FrameData:
 
 
 class NetworkReceiver:
-    """網路資料接收器"""
+    """網路資料接收器（支援 Server 和 Client 模式）"""
     
     def __init__(self, on_frame_received: Optional[Callable[[FrameData], None]] = None):
         """
@@ -47,6 +47,8 @@ class NetworkReceiver:
             on_frame_received: 當接收到完整幀資料時的回調函數
         """
         self.socket: Optional[socket.socket] = None
+        self.server_socket: Optional[socket.socket] = None  # Server 模式用
+        self.client_socket: Optional[socket.socket] = None  # 當前連接的客戶端
         self.is_connected: bool = False
         self.is_running: bool = False
         self.stop_event = threading.Event()
@@ -68,8 +70,12 @@ class NetworkReceiver:
         self.current_fps: float = 0.0
         
         # 連接參數
+        self.mode = config.network.mode  # "server" 或 "client"
         self.host = config.network.host
         self.port = config.network.port
+        
+        # 客戶端資訊（Server 模式）
+        self.client_addr: Optional[tuple] = None
         
     def debug_log(self, msg: str):
         """除錯日誌"""
@@ -89,8 +95,14 @@ class NetworkReceiver:
         self.is_running = True
         self.stop_event.clear()
         
-        # 啟動連接執行緒
-        self.read_thread = threading.Thread(target=self._connection_loop, daemon=True)
+        # 根據模式啟動不同的連接執行緒
+        if self.mode == "server":
+            self.read_thread = threading.Thread(target=self._server_loop, daemon=True)
+            self.debug_log(f"Starting in SERVER mode on {self.host}:{self.port}")
+        else:
+            self.read_thread = threading.Thread(target=self._connection_loop, daemon=True)
+            self.debug_log(f"Starting in CLIENT mode, connecting to {self.host}:{self.port}")
+        
         self.read_thread.start()
         
         # 啟動處理執行緒
@@ -105,6 +117,15 @@ class NetworkReceiver:
         self.is_running = False
         self.stop_event.set()
         self._disconnect()
+        
+        # 關閉 Server socket
+        if self.server_socket:
+            try:
+                self.server_socket.close()
+            except:
+                pass
+            self.server_socket = None
+        
         self.debug_log("Network receiver stopped")
     
     def _connect(self) -> bool:
@@ -135,11 +156,81 @@ class NetworkReceiver:
                 pass
             self.socket = None
         
+        if self.client_socket:
+            try:
+                self.client_socket.close()
+            except:
+                pass
+            self.client_socket = None
+        
         was_connected = self.is_connected
         self.is_connected = False
+        self.client_addr = None
         
         if was_connected and self.on_connection_changed:
             self.on_connection_changed(False)
+    
+    def _server_loop(self):
+        """Server 模式：監聽並接受連接"""
+        self.debug_log("Server loop started")
+        
+        try:
+            self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.server_socket.bind((self.host, self.port))
+            self.server_socket.listen(1)
+            self.server_socket.settimeout(1.0)
+            self.debug_log(f"Server listening on {self.host}:{self.port}")
+        except Exception as e:
+            self.debug_log(f"Server bind failed: {e}")
+            return
+        
+        byte_buffer = b""
+        
+        while not self.stop_event.is_set() and self.is_running:
+            # 如果沒有連接，等待新連接
+            if not self.is_connected:
+                try:
+                    client_sock, addr = self.server_socket.accept()
+                    client_sock.settimeout(0.1)
+                    self.client_socket = client_sock
+                    self.client_addr = addr
+                    self.is_connected = True
+                    byte_buffer = b""
+                    self.debug_log(f"Client connected from {addr}")
+                    
+                    if self.on_connection_changed:
+                        self.on_connection_changed(True)
+                        
+                except socket.timeout:
+                    continue
+                except Exception as e:
+                    self.debug_log(f"Accept error: {e}")
+                    time.sleep(0.5)
+                    continue
+            
+            # 讀取已連接客戶端的資料
+            try:
+                chunk = self.client_socket.recv(config.network.buffer_size)
+                if not chunk:
+                    self.debug_log(f"Client {self.client_addr} disconnected")
+                    self._disconnect()
+                    continue
+                
+                byte_buffer += chunk
+                
+                while b'\n' in byte_buffer:
+                    line, byte_buffer = byte_buffer.split(b'\n', 1)
+                    if line:
+                        self.data_queue.put(line)
+                        
+            except socket.timeout:
+                continue
+            except Exception as e:
+                self.debug_log(f"Read error from client: {e}")
+                self._disconnect()
+        
+        self.debug_log("Server loop ended")
     
     def _connection_loop(self):
         """連接管理執行緒（包含讀取功能）"""
@@ -281,6 +372,11 @@ class NetworkReceiver:
     
     def get_connection_info(self) -> str:
         """獲取連接資訊"""
-        if self.is_connected:
-            return f"{self.host}:{self.port}"
-        return "未連接"
+        if self.mode == "server":
+            if self.is_connected and self.client_addr:
+                return f"Server:{self.port} ← {self.client_addr[0]}:{self.client_addr[1]}"
+            return f"Server:{self.port} (等待連接...)"
+        else:
+            if self.is_connected:
+                return f"Client → {self.host}:{self.port}"
+            return "未連接"
