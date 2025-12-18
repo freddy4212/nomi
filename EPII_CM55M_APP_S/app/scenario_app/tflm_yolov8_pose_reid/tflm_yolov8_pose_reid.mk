@@ -13,8 +13,44 @@ APPL_DEFINES += -DUART_SEND_ALOGO_RESEULT
 #APPL_DEFINES += -DEVT_CM55MTIMER -DEVT_CM55MMB
 APPL_DEFINES += -DDBG_MORE
 
+##
+# UART Output Port Selection (only applies when OUTPUT_MODE uses UART)
+# Options:
+#   0 = USB UART only (UART0, via USB Type-C debug port)
+#   1 = XIAO Connector UART only (UART1, PB6=RX, PB7=TX)
+#   2 = Both UART0 and UART1 (for comparing ESP32 forwarding vs direct Serial)
+##
+UART_OUTPUT_PORT := 1
+
+ifeq ($(UART_OUTPUT_PORT), 1)
+APPL_DEFINES += -DUART_USE_XIAO_CONNECTOR
+else ifeq ($(UART_OUTPUT_PORT), 2)
+APPL_DEFINES += -DUART_USE_BOTH
+endif
+
+##
+# Output Mode Selection
+# Options:
+#   0 = UART only (USB Type-C and XIAO Connector)
+#   1 = I2C only (Grove connector, for ESP32/XIAO connection via Grove cable)
+#   2 = Both UART and I2C (may have performance impact)
+##
+OUTPUT_MODE := 0
+
+ifeq ($(OUTPUT_MODE), 1)
+APPL_DEFINES += -DOUTPUT_VIA_I2C
+# 啟用 I2C Slave 0 驅動 (注意: IIC 是兩個 I，不是 IIIC)
+APPL_DEFINES += -DIP_INST_IIC_SLAVE0
+else ifeq ($(OUTPUT_MODE), 2)
+APPL_DEFINES += -DOUTPUT_VIA_I2C
+APPL_DEFINES += -DOUTPUT_VIA_UART
+APPL_DEFINES += -DIP_INST_IIC_SLAVE0
+else
+APPL_DEFINES += -DOUTPUT_VIA_UART
+endif
+
 # Uncomment the following line to enable SD card input for testing
-ENABLE_SD_TEST := 1
+# ENABLE_SD_TEST := 1
 
 ifdef ENABLE_SD_TEST
 APPL_DEFINES += -DUSE_SD_CARD_INPUT

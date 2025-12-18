@@ -34,7 +34,7 @@ typedef struct _nj_ctx {
     int qtused, qtavail;
     unsigned char qtab[4][64];
     nj_code_t *vlctab[4];
-    int buf, bufbits;
+    unsigned int buf; int bufbits;
     int block[64];
     int rstinterval;
     unsigned char *rgb;
@@ -48,6 +48,15 @@ static unsigned char *nj_mem_ptr;
 static unsigned char *nj_high_ptr;
 // Total size of reid_tensor_arena is 1450KB.
 static const int nj_mem_limit = 1450 * 1024; 
+
+// External RGB buffer support - output goes here instead of tensor arena
+static unsigned char *nj_ext_rgb_buf = NULL;
+static int nj_ext_rgb_size = 0;
+
+void njSetExternalRGBBuffer(unsigned char* buf, int size) {
+    nj_ext_rgb_buf = buf;
+    nj_ext_rgb_size = size;
+}
 
 const unsigned char njZZ[64] = { 0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18,
 11, 4, 5, 12, 19, 26, 33, 40, 48, 41, 34, 27, 20, 13, 6, 7, 14, 21, 28, 35,
@@ -175,7 +184,14 @@ NJ_INLINE void njDecodeSOF0(void) {
     nj.scale = 0;
     int rgb_size = nj.width * nj.height * nj.ncomp;
     xprintf("Alloc RGB full: %d bytes\n", rgb_size);
-    nj.rgb = (unsigned char*)njAlloc(rgb_size);
+    
+    // Use external buffer if provided
+    if (nj_ext_rgb_buf && nj_ext_rgb_size >= rgb_size) {
+        xprintf("Using external RGB buffer\n");
+        nj.rgb = nj_ext_rgb_buf;
+    } else {
+        nj.rgb = (unsigned char*)njAlloc(rgb_size);
+    }
     
     if (!nj.rgb) {
         // If full size fails, try 1/2 size (1/4 memory)
@@ -184,7 +200,14 @@ NJ_INLINE void njDecodeSOF0(void) {
         int h = (nj.height + 1) >> 1;
         rgb_size = w * h * nj.ncomp;
         xprintf("Alloc RGB half: %d bytes\n", rgb_size);
-        nj.rgb = (unsigned char*)njAlloc(rgb_size);
+        
+        // Use external buffer if provided
+        if (nj_ext_rgb_buf && nj_ext_rgb_size >= rgb_size) {
+            xprintf("Using external RGB buffer (half)\n");
+            nj.rgb = nj_ext_rgb_buf;
+        } else {
+            nj.rgb = (unsigned char*)njAlloc(rgb_size);
+        }
         if (!nj.rgb) {
             nj.error = NJ_OUT_OF_MEM; 
             return; 
@@ -267,10 +290,10 @@ NJ_INLINE int njGetVLC(nj_code_t* vlc, unsigned char* code) {
     nj.bufbits -= bits;
     while (nj.bufbits < 16) {
         if (nj.size) {
-            nj.buf |= (*nj.pos++) << (8 - nj.bufbits);
+            nj.buf |= ((unsigned int)(*nj.pos++)) << (24 - nj.bufbits);
             nj.size--;
-            if ((nj.buf & 0xFF) == 0xFF) {
-                if (nj.size && *nj.pos) {
+            if (((nj.buf >> (24 - nj.bufbits)) & 0xFF) == 0xFF) {
+                if (nj.size && !*nj.pos) {
                     nj.size--; nj.pos++; // skip 00
                 }
             }
@@ -286,33 +309,35 @@ NJ_INLINE void njDecodeBlock(nj_cmp_t* c, unsigned char* out) {
     int value, coef = 0;
     nj_code_t* vlc = nj.vlctab[c->dctabsel];
     njFillMem(nj.block, 0);
-    njGetVLC(nj.vlctab[c->actabsel], &code); // dummy read to init
     
     // DC
     njGetVLC(vlc, &code);
     if (code) {
-        nj.buf <<= code; nj.bufbits -= code;
-        while (nj.bufbits < 16) {
+        // Ensure enough bits are in buffer for the amplitude
+        while (nj.bufbits < 16) { // 16 is safe upper bound, or use 'code'
              if (nj.size) {
-                nj.buf |= (*nj.pos++) << (8 - nj.bufbits);
+                nj.buf |= ((unsigned int)(*nj.pos++)) << (24 - nj.bufbits);
                 nj.size--;
-                if ((nj.buf & 0xFF) == 0xFF) {
-                    if (nj.size && *nj.pos) {
+                if (((nj.buf >> (24 - nj.bufbits)) & 0xFF) == 0xFF) {
+                    if (nj.size && !*nj.pos) {
                         nj.size--; nj.pos++;
                     }
                 }
             }
             nj.bufbits += 8;
         }
+        
         value = nj.buf >> (32 - code);
         if (code < 32 && value < (1 << (code - 1))) value += ((-1) << code) + 1;
+        
+        // Consume the amplitude bits
         nj.buf <<= code; nj.bufbits -= code;
         while (nj.bufbits < 16) {
              if (nj.size) {
-                nj.buf |= (*nj.pos++) << (8 - nj.bufbits);
+                nj.buf |= ((unsigned int)(*nj.pos++)) << (24 - nj.bufbits);
                 nj.size--;
-                if ((nj.buf & 0xFF) == 0xFF) {
-                    if (nj.size && *nj.pos) {
+                if (((nj.buf >> (24 - nj.bufbits)) & 0xFF) == 0xFF) {
+                    if (nj.size && !*nj.pos) {
                         nj.size--; nj.pos++;
                     }
                 }
@@ -336,10 +361,10 @@ NJ_INLINE void njDecodeBlock(nj_cmp_t* c, unsigned char* out) {
         nj.buf <<= code; nj.bufbits -= code;
         while (nj.bufbits < 16) {
              if (nj.size) {
-                nj.buf |= (*nj.pos++) << (8 - nj.bufbits);
+                nj.buf |= ((unsigned int)(*nj.pos++)) << (24 - nj.bufbits);
                 nj.size--;
-                if ((nj.buf & 0xFF) == 0xFF) {
-                    if (nj.size && *nj.pos) {
+                if (((nj.buf >> (24 - nj.bufbits)) & 0xFF) == 0xFF) {
+                    if (nj.size && !*nj.pos) {
                         nj.size--; nj.pos++;
                     }
                 }
@@ -414,8 +439,13 @@ NJ_INLINE void njDecodeScan(void) {
     int bufsize = 0;
     // Fill buffer
     while(nj.bufbits < 16 && nj.size > 0) {
-        nj.buf = (nj.buf << 8) | *nj.pos++;
+        nj.buf |= ((unsigned int)(*nj.pos++)) << (24 - nj.bufbits);
         nj.size--;
+        if (((nj.buf >> (24 - nj.bufbits)) & 0xFF) == 0xFF) {
+             if (nj.size && !*nj.pos) {
+                 nj.size--; nj.pos++; // skip 00
+             }
+        }
         nj.bufbits += 8;
     }
 
@@ -475,12 +505,17 @@ NJ_INLINE void njConvert(void) {
             r = nj.rgb + i * w * 3;
             for (j = 0; j < w; ++j) {
                 int src_x = (nj.scale == 1) ? (j << 1) : j;
-                int yy = y[src_x] << 8;
-                int ccb = cb[src_x / nj.comp[1].ssx] - 128;
-                int ccr = cr[src_x / nj.comp[2].ssx] - 128;
-                r[0] = njClip((yy + 359 * ccr) >> 8);
-                r[1] = njClip((yy - 88 * ccb - 183 * ccr) >> 8);
-                r[2] = njClip((yy + 454 * ccb) >> 8);
+                int yy = y[src_x]; // Use Y directly
+                
+                // Debug center pixel
+                if (i == h/2 && j == w/2) {
+                    xprintf("Center Pixel Y (Gray): %d\n", yy);
+                }
+
+                // Force Grayscale for debugging
+                r[0] = yy;
+                r[1] = yy;
+                r[2] = yy;
                 r += 3;
             }
         }

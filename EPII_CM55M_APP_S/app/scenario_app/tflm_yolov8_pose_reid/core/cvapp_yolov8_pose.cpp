@@ -46,6 +46,10 @@
 #include "yolov8_pose_postprocess.h"
 #include "reid_inference.h"
 
+#ifdef USE_SD_CARD_INPUT
+#include "sd_card_helper.h"
+#endif
+
 // Enable ReID inference (set to 0 to test pure YOLOv8 Pose)
 #define ENABLE_REID_INFERENCE 1
 
@@ -269,6 +273,15 @@ int cv_yolov8_pose_init(bool security_enable, bool privilege_enable, uint32_t mo
 	// Use separate arenas
     // extern uint8_t reid_tensor_arena[]; // Defined in reid.cpp
 	xprintf("YOLO Arena [%p] (Shared with ReID), ReID Arena [extern]\r\n", reid_tensor_arena);
+    xprintf("Raw Addr [%p]\n", (void*)app_get_raw_addr());
+    
+    // Check for overlap
+    uintptr_t arena_start = (uintptr_t)reid_tensor_arena;
+    uintptr_t arena_end = arena_start + reid_tensor_arena_size;
+    uintptr_t raw_start = (uintptr_t)app_get_raw_addr();
+    if (raw_start >= arena_start && raw_start < arena_end) {
+        xprintf("CRITICAL WARNING: Raw Addr is INSIDE Tensor Arena! Image will be corrupted by reinit.\n");
+    }
 
     // Initialize NPU first (before any model that uses Ethos-U)
 	if(_arm_npu_init(security_enable, privilege_enable)!=0)
@@ -347,6 +360,10 @@ int cv_yolov8_pose_run(struct_yolov8_pose_algoResult *algoresult_yolov8_pose) {
 	std::forward_list<el_keypoint_t> el_keypoint_algo;
 	static uint32_t frame_count = 0;  // Frame counter for debug output
 	frame_count++;
+	// 防止溢出：當達到 1000000000 (10億) 時重設
+	if (frame_count >= 1000000000) {
+		frame_count = 1;
+	}
 
 	#if DBG_APP_LOG
     xprintf("raw info: w[%d] h[%d] ch[%d] addr[%x]\n",img_w, img_h, ch, raw_addr);
@@ -365,13 +382,46 @@ int cv_yolov8_pose_run(struct_yolov8_pose_algoResult *algoresult_yolov8_pose) {
             SystemGetTick(&systick_1, &loop_cnt_1);
         #endif
 #ifdef USE_SD_CARD_INPUT
-		hx_lib_image_resize_helium((uint8_t*)raw_addr, (uint8_t*)yolov8_pose_input->data.data,  
+        // Use the malloc'd decoded image buffer that survives tensor arena reinit
+        // This is critical because the JPEG decoder uses the same arena as the model
+        uint8_t* src = sd_get_decoded_image();
+        if (src == NULL) {
+            xprintf("ERROR: No decoded image available!\n");
+            return -1;
+        }
+        
+        // Manual copy for SD card to ensure correct RGB format and avoid library issues
+        if (img_w == YOLOV8_POSE_INPUT_TENSOR_WIDTH && img_h == YOLOV8_POSE_INPUT_TENSOR_HEIGHT) {
+            int8_t* dst = (int8_t*)yolov8_pose_input->data.data;
+            int total_pixels = img_w * img_h;
+            for (int i = 0; i < total_pixels; i++) {
+                // Input is RGB (from jpeg_decoder), Output is RGB (for model)
+                // Convert uint8 (0~255) to int8 (-128~127)
+                dst[i*3 + 0] = (int8_t)((int)src[i*3 + 0] - 128); // R
+                dst[i*3 + 1] = (int8_t)((int)src[i*3 + 1] - 128); // G
+                dst[i*3 + 2] = (int8_t)((int)src[i*3 + 2] - 128); // B
+            }
+        } else {
+            // Fallback to library if size differs (though we expect 256x256)
+		    hx_lib_image_resize_helium(src, (uint8_t*)yolov8_pose_input->data.data,  
 		                    img_w, img_h, ch, 
                         	YOLOV8_POSE_INPUT_TENSOR_WIDTH, YOLOV8_POSE_INPUT_TENSOR_HEIGHT, w_scale,h_scale);
+            // uint8 to int8 conversion for library output
+            for (int i = 0; i < yolov8_pose_input->bytes; ++i) {
+			    *((int8_t *)yolov8_pose_input->data.data+i) = *((int8_t *)yolov8_pose_input->data.data+i) - 128;
+    	    }
+        }
+        
+        // Release the decoded image buffer now that we've copied to input tensor
+        sd_release_decoded_image();
 #else
 		hx_lib_image_resize_BGR8U3C_to_RGB24_helium((uint8_t*)raw_addr, (uint8_t*)yolov8_pose_input->data.data,  
 		                    img_w, img_h, ch, 
                         	YOLOV8_POSE_INPUT_TENSOR_WIDTH, YOLOV8_POSE_INPUT_TENSOR_HEIGHT, w_scale,h_scale);
+        // uint8 to int8 conversion for library output
+        for (int i = 0; i < yolov8_pose_input->bytes; ++i) {
+			*((int8_t *)yolov8_pose_input->data.data+i) = *((int8_t *)yolov8_pose_input->data.data+i) - 128;
+    	}
 #endif
 		#if EACH_STEP_TICK						
             SystemGetTick(&systick_2, &loop_cnt_2);
@@ -382,9 +432,29 @@ int cv_yolov8_pose_run(struct_yolov8_pose_algoResult *algoresult_yolov8_pose) {
         #endif
         
         // //uint8 to int8
-		for (int i = 0; i < yolov8_pose_input->bytes; ++i) {
-			*((int8_t *)yolov8_pose_input->data.data+i) = *((int8_t *)yolov8_pose_input->data.data+i) - 128;
-    	}
+        // Moved inside the if/else block above to avoid double conversion
+		// for (int i = 0; i < yolov8_pose_input->bytes; ++i) {
+		// 	*((int8_t *)yolov8_pose_input->data.data+i) = *((int8_t *)yolov8_pose_input->data.data+i) - 128;
+    	// }
+
+        // TEST: Force input to gray (0) to check if Giant Box persists
+        // Real 128 -> Int8 0. (Since ZP=-128, Real 0 -> -128. Real 128 -> 0)
+        // memset(yolov8_pose_input->data.data, 0, yolov8_pose_input->bytes);
+        // xprintf("WARNING: FORCED INPUT TO GRAY (0)\n");
+
+        // Debug: Print first 16 bytes of input tensor to verify data
+        xprintf("Input Tensor Data (First 16 bytes): ");
+        for(int i=0; i<16; i++) {
+            xprintf("%d ", *((int8_t *)yolov8_pose_input->data.data+i));
+        }
+        xprintf("\n");
+        
+        // Debug: Print center pixel of input tensor
+        int center_idx = (YOLOV8_POSE_INPUT_TENSOR_HEIGHT/2 * YOLOV8_POSE_INPUT_TENSOR_WIDTH + YOLOV8_POSE_INPUT_TENSOR_WIDTH/2) * 3;
+        xprintf("Input Tensor Center Pixel: %d %d %d\n", 
+            *((int8_t *)yolov8_pose_input->data.data+center_idx),
+            *((int8_t *)yolov8_pose_input->data.data+center_idx+1),
+            *((int8_t *)yolov8_pose_input->data.data+center_idx+2));
 
         #if EACH_STEP_TICK
             SystemGetTick(&systick_2, &loop_cnt_2);
@@ -394,6 +464,9 @@ int cv_yolov8_pose_run(struct_yolov8_pose_algoResult *algoresult_yolov8_pose) {
         // Debug: Print input tensor type and quantization
         TfLiteAffineQuantization* input_quant = (TfLiteAffineQuantization*)(yolov8_pose_input->quantization.params);
         xprintf("Input Tensor: Type=%d, ZP=%d, Scale=%f\n", yolov8_pose_input->type, input_quant->zero_point->data[0], input_quant->scale->data[0]);
+
+        // Flush D-Cache for input tensor so NPU sees the updated data
+        hx_CleanDCache_by_Addr((void*)yolov8_pose_input->data.data, yolov8_pose_input->bytes);
 
         #if EACH_STEP_TICK
 		SystemGetTick(&systick_1, &loop_cnt_1);
@@ -427,7 +500,7 @@ int cv_yolov8_pose_run(struct_yolov8_pose_algoResult *algoresult_yolov8_pose) {
 
 		yolov8_pose_post_processing(
             yolov8_pose_int_ptr,
-            0.25, 
+            0.10, 
             0.45, 
             algoresult_yolov8_pose,
             el_keypoint_algo,

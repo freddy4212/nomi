@@ -99,3 +99,84 @@
 - [Yolov8n pose](https://github.com/HimaxWiseEyePlus/YOLOv8_on_WE2?tab=readme-ov-file#yolov8n-pose)
 
 [Back to Outline](https://github.com/HimaxWiseEyePlus/Seeed_Grove_Vision_AI_Module_V2?tab=readme-ov-file#outline)
+
+---
+
+## Output Mode Configuration (I2C / UART)
+
+### Overview
+This firmware supports three output modes for sending JSON results:
+
+| Mode | Value | Description |
+|------|-------|-------------|
+| UART only | 0 | Output via USB Type-C (default, 921600 baud) |
+| I2C only | 1 | Output via Grove connector (I2C Slave, address 0x62) |
+| Both | 2 | Output to both USB and Grove (may impact performance) |
+
+### How to Configure
+
+Edit `tflm_yolov8_pose_reid.mk` and change `OUTPUT_MODE`:
+
+```makefile
+# Output Mode Selection
+# Options:
+#   0 = UART only (USB Type-C, default)
+#   1 = I2C only (Grove connector, for ESP32/XIAO connection)
+#   2 = Both UART and I2C (may have performance impact)
+##
+OUTPUT_MODE := 1   # Change this value
+```
+
+### I2C Connection (OUTPUT_MODE = 1 or 2)
+
+When I2C output is enabled:
+- **I2C Address**: `0x62`
+- **Grove Connector Pins**: PA2 (SCL), PA3 (SDA)
+- **Protocol**: I2C Slave mode - master (ESP32/XIAO) reads data from Vision AI
+
+#### Wiring for ESP32/XIAO:
+| Grove Vision AI V2 | ESP32/XIAO |
+|-------------------|------------|
+| GND (Black) | GND |
+| VCC (Red) | 3.3V |
+| SDA (White) | SDA (I2C) |
+| SCL (Yellow) | SCL (I2C) |
+
+### ESP32 Example Code (I2C Master)
+```cpp
+#include <Wire.h>
+
+#define VISION_AI_ADDR 0x62
+#define BUFFER_SIZE 4096
+
+char buffer[BUFFER_SIZE];
+
+void setup() {
+  Serial.begin(115200);
+  Wire.begin();  // Initialize I2C as master
+  Wire.setClock(400000);  // 400kHz
+}
+
+void loop() {
+  int idx = 0;
+  
+  // Request data from Vision AI
+  Wire.requestFrom(VISION_AI_ADDR, 32);  // Read 32 bytes at a time
+  
+  while (Wire.available() && idx < BUFFER_SIZE - 1) {
+    buffer[idx++] = Wire.read();
+  }
+  buffer[idx] = '\0';
+  
+  if (idx > 0) {
+    Serial.print(buffer);
+  }
+  
+  delay(10);  // Small delay between reads
+}
+```
+
+### Notes
+- I2C mode uses interrupt-based transmission for efficiency
+- For high frame rates with large JPEG images, UART (USB) is recommended
+- The I2C slave prepares data when the master initiates a read request

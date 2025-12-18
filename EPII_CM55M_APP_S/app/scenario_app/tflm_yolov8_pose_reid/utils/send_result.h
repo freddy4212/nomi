@@ -17,8 +17,28 @@
 #include <math.h>
 extern "C" {
 #include "hx_drv_swreg_aon.h"
+#ifdef OUTPUT_VIA_I2C
+#include "hx_drv_iic.h"
+#include "hx_drv_scu.h"
+#endif
+#ifdef OUTPUT_VIA_UART
+#include "hx_drv_scu.h"  // For pin mux configuration
+#endif
 }
-#define CONSOLE_UART_ID 0
+
+// UART Configuration
+// UART0 = USB Debug UART (via USB-C)
+// UART1 = XIAO Connector UART (PB6=RX, PB7=TX)
+#define CONSOLE_UART_ID       0   // USB Debug UART
+#define XIAO_UART_ID          1   // XIAO Connector UART (PB6/PB7)
+#define OUTPUT_UART_ID        XIAO_UART_ID  // Use XIAO Connector for output
+
+// I2C Slave Configuration
+#ifdef OUTPUT_VIA_I2C
+#define I2C_SLAVE_ADDR      0x62    // Same as SSCMA library default address
+#define I2C_SLAVE_ID        USE_DW_IIC_SLV_0  // Use I2C Slave 0 (PA2/PA3 pins = Grove connector)
+#endif
+
 #define EL_ATTR_WEAK __attribute__((weak))
 #define EL_VERSION                 __TIMESTAMP__
 #define CONFIG_SSCMA_CMD_MAX_LENGTH (4096)
@@ -194,5 +214,33 @@ void send_yolov8_pose_reid_results(
     const std::vector<std::vector<float>>& reid_vectors,
     el_img_t* img
 );
+
+// Output interface initialization and functions
+#ifdef OUTPUT_VIA_I2C
+/**
+ * @brief Initialize I2C slave interface for Grove connector output
+ * @return EL_OK on success
+ */
+el_err_code_t i2c_output_init(void);
+
+/**
+ * @brief Send bytes via I2C slave (master reads from us)
+ * @param buffer Data to send
+ * @param size Size of data
+ * @return EL_OK on success
+ */
+el_err_code_t i2c_send_bytes(const char* buffer, size_t size);
+#endif
+
+/**
+ * @brief Initialize all output interfaces based on compile options
+ */
+#ifdef __cplusplus
+extern "C" {
+#endif
+void output_init(void);
+#ifdef __cplusplus
+}
+#endif
 
 #endif // SEND_RESULT_H

@@ -777,6 +777,7 @@ void event_handler_start(void)
 // Function used to stop the event handler process
 void event_handler_stop(void)
 {
+    dbg_printf(DBG_LESS_INFO, "event_handler_stop called!\n");
     hx_eventloop_stop();
     return;
 }

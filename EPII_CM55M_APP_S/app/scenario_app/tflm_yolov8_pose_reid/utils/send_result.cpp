@@ -3,6 +3,12 @@ extern "C" {
 #include "hx_drv_swreg_aon.h"
 #include "tflm_yolov8_pose.h"
 #include "hx_drv_scu.h"
+#include "xprintf.h"  // For xprintf
+#ifdef OUTPUT_VIA_I2C
+#include "hx_drv_iic.h"
+#include "WE2_device.h"
+#include "WE2_device_addr.h"  // For HX_I2C_HOST_SLV_0_BASE
+#endif
 }
 #include <math.h>
 
@@ -18,29 +24,310 @@ extern "C" {
 
 static char*       img_2_json_str_buffer      = nullptr;
 
-el_err_code_t send_bytes(const char* buffer, size_t size) {
-    DEV_UART* console_uart;
-    console_uart = hx_drv_uart_get_dev((USE_DW_UART_E)CONSOLE_UART_ID);
-    console_uart->uart_open(UART_BAUDRATE_921600);
-    size_t sent{0};
-    size_t pos_of_bytes{0};
+// ============================================================================
+// I2C Slave Output Implementation (Simple Mode - Direct Read)
+// ============================================================================
+#ifdef OUTPUT_VIA_I2C
 
-    while (size) {
-        size_t bytes_to_send{size < 64 ? size : 64};
+// I2C communication buffers - minimal size to save RAM
+static uint8_t g_i2c_rx_buffer[8];    // Receive buffer for commands
+static uint8_t g_i2c_tx_buffer[128];  // Transmit buffer for response  
+static HX_DRV_DEV_IIC* g_i2c_dev = nullptr;
+static volatile bool g_i2c_initialized = false;
 
-        uint32_t written = console_uart->uart_write(buffer + pos_of_bytes, bytes_to_send);
+// Simple data buffer - stores last JSON frame for Master to read
+// Uses pointer to existing JSON buffer instead of copying
+static const char* g_i2c_data_ptr = nullptr;
+static volatile uint32_t g_i2c_data_len = 0;
+static volatile uint32_t g_i2c_data_offset = 0;  // Current read position
+
+// Forward declarations
+static void i2c_restart_rx(void);
+
+// TX complete callback
+static void i2c_slave_tx_cb(void* param) {
+    (void)param;
+    // Restart listening for commands after TX complete
+    i2c_restart_rx();
+}
+
+// RX complete callback - process commands from Master
+static void i2c_slave_rx_cb(void* param) {
+    (void)param;
+    // For simple mode, just prepare data for next read
+    i2c_restart_rx();
+}
+
+// Error callback - handle when Master reads without sending command first
+// This is the main read path - Master just reads directly
+static void i2c_slave_err_cb(void* param) {
+    HX_DRV_DEV_IIC* iic_obj = (HX_DRV_DEV_IIC*)param;
+    HX_DRV_DEV_IIC_INFO* iic_info_ptr = &(iic_obj->iic_info);
+    
+    if (iic_info_ptr->err_state == DEV_IIC_ERR_TX_DATA_UNREADY) {
+        // Master is reading - send available data
+        if (g_i2c_data_ptr != nullptr && g_i2c_data_offset < g_i2c_data_len) {
+            uint32_t remaining = g_i2c_data_len - g_i2c_data_offset;
+            uint32_t to_send = (remaining < sizeof(g_i2c_tx_buffer)) ? remaining : sizeof(g_i2c_tx_buffer);
+            
+            memcpy(g_i2c_tx_buffer, g_i2c_data_ptr + g_i2c_data_offset, to_send);
+            g_i2c_data_offset += to_send;
+            
+            hx_drv_i2cs_interrupt_write(I2C_SLAVE_ID, I2C_SLAVE_ADDR,
+                                        g_i2c_tx_buffer, to_send, (void*)i2c_slave_tx_cb);
+        } else {
+            // No data or all data sent - send newline to indicate end
+            g_i2c_tx_buffer[0] = '\n';
+            g_i2c_data_offset = 0;  // Reset for next frame
+            hx_drv_i2cs_interrupt_write(I2C_SLAVE_ID, I2C_SLAVE_ADDR,
+                                        g_i2c_tx_buffer, 1, (void*)i2c_slave_tx_cb);
+        }
+    }
+}
+
+// Restart RX listening
+static void i2c_restart_rx(void) {
+    memset(g_i2c_rx_buffer, 0, sizeof(g_i2c_rx_buffer));
+    hx_drv_i2cs_interrupt_read(I2C_SLAVE_ID, I2C_SLAVE_ADDR,
+                               g_i2c_rx_buffer, sizeof(g_i2c_rx_buffer),
+                               (void*)i2c_slave_rx_cb);
+}
+
+el_err_code_t i2c_output_init(void) {
+    if (g_i2c_initialized) {
+        return EL_OK;
+    }
+    
+    xprintf("\r\n[I2C] Starting I2C Slave initialization...\r\n");
+    
+    // Configure I2C Slave 0 pins (PA2=SCL, PA3=SDA) - Grove connector
+    hx_drv_scu_set_PA2_pinmux(SCU_PA2_PINMUX_SB_I2C_S_SCL_0, 1);
+    hx_drv_scu_set_PA3_pinmux(SCU_PA3_PINMUX_SB_I2C_S_SDA_0, 1);
+    xprintf("[I2C] Pins configured: PA2=SCL, PA3=SDA\r\n");
+    
+    // Initialize I2C Slave 0
+#ifdef HX_I2C_HOST_SLV_0_BASE
+    IIC_ERR_CODE_E ret = hx_drv_i2cs_init(I2C_SLAVE_ID, HX_I2C_HOST_SLV_0_BASE);
+#else
+    IIC_ERR_CODE_E ret = hx_drv_i2cs_init(I2C_SLAVE_ID, BASE_ADDR_APB_I2C_SLAVE);
+#endif
+    if (ret != IIC_ERR_OK) {
+        printf("[I2C] Init failed with error %d\r\n", ret);
+        return EL_EIO;
+    }
+    
+    // Get I2C device handle
+    g_i2c_dev = hx_drv_i2cs_get_dev(I2C_SLAVE_ID);
+    if (g_i2c_dev == nullptr) {
+        printf("[I2C] Failed to get device handle\r\n");
+        return EL_EIO;
+    }
+    
+    // Set callbacks via device control
+    g_i2c_dev->iic_control(DW_IIC_CMD_SET_TXCB, (void*)i2c_slave_tx_cb);
+    g_i2c_dev->iic_control(DW_IIC_CMD_SET_RXCB, (void*)i2c_slave_rx_cb);
+    g_i2c_dev->iic_control(DW_IIC_CMD_SET_ERRCB, (void*)i2c_slave_err_cb);
+    g_i2c_dev->iic_control(DW_IIC_CMD_SLV_SET_SLV_ADDR, (void*)(uintptr_t)I2C_SLAVE_ADDR);
+    
+    // Start listening for commands
+    i2c_restart_rx();
+    
+    g_i2c_initialized = true;
+    
+    xprintf("[I2C] *** Slave initialized at address 0x%02X ***\r\n", I2C_SLAVE_ADDR);
+    xprintf("[I2C] *** Grove connector ready (PA2/PA3) ***\r\n");
+    
+    return EL_OK;
+}
+
+// Store JSON data pointer for I2C Master to read
+el_err_code_t i2c_send_bytes(const char* buffer, size_t size) {
+    if (!g_i2c_initialized) {
+        el_err_code_t ret = i2c_output_init();
+        if (ret != EL_OK) return ret;
+    }
+    
+    // Update data pointer (Master will read on next request)
+    g_i2c_data_ptr = buffer;
+    g_i2c_data_len = size;
+    g_i2c_data_offset = 0;
+    
+    return EL_OK;
+}
+
+#endif // OUTPUT_VIA_I2C
+
+// ============================================================================
+// Output Interface Initialization
+// ============================================================================
+
+// Forward declaration for uart_output_init
+#ifdef OUTPUT_VIA_UART
+static el_err_code_t uart_output_init(void);
+#endif
+
+// Use extern "C" so this function can be called from C files
+extern "C" void output_init(void) {
+    xprintf("\r\n========== OUTPUT INIT ==========\r\n");
+#ifdef OUTPUT_VIA_I2C
+    xprintf("[Output] I2C mode enabled, calling i2c_output_init()...\r\n");
+    i2c_output_init();
+    xprintf("[Output] I2C output enabled on Grove connector\r\n");
+#endif
+#ifdef OUTPUT_VIA_UART
+    xprintf("[Output] UART mode enabled, calling uart_output_init()...\r\n");
+    uart_output_init();
+#ifdef UART_USE_BOTH
+    xprintf("[Output] UART output via BOTH USB (UART0) + XIAO Connector (UART1)\r\n");
+#elif defined(UART_USE_XIAO_CONNECTOR)
+    xprintf("[Output] UART output via XIAO Connector (UART1, PB6=RX, PB7=TX)\r\n");
+#else
+    xprintf("[Output] UART output via USB Type-C (UART0)\r\n");
+#endif
+#endif
+    xprintf("==================================\r\n\r\n");
+}
+
+// ============================================================================
+// UART Send - selectable between USB UART0, XIAO Connector UART1, or BOTH
+// ============================================================================
+#ifdef OUTPUT_VIA_UART
+static bool g_uart_output_initialized = false;
+static DEV_UART* g_output_uart = nullptr;
+
+// For dual UART mode
+#ifdef UART_USE_BOTH
+static DEV_UART* g_uart0 = nullptr;
+static DEV_UART* g_uart1 = nullptr;
+#endif
+
+static el_err_code_t uart_output_init(void) {
+    if (g_uart_output_initialized) {
+        return EL_OK;
+    }
+    
+#ifdef UART_USE_BOTH
+    // Initialize BOTH UART0 (USB) and UART1 (XIAO Connector)
+    xprintf("[UART] Initializing DUAL UART mode (USB + XIAO)...\n");
+    
+    // UART0 (USB) - already initialized by system, just get the handle
+    g_uart0 = hx_drv_uart_get_dev((USE_DW_UART_E)CONSOLE_UART_ID);
+    if (g_uart0 == nullptr) {
+        xprintf("[UART] ERROR: Failed to get UART0 device!\n");
+        return EL_EPERM;
+    }
+    xprintf("[UART] UART0 (USB) ready\n");
+    
+    // UART1 (XIAO Connector) - need to configure pins
+    hx_drv_scu_set_PB6_pinmux(SCU_PB6_PINMUX_UART1_RX, 0);
+    hx_drv_scu_set_PB7_pinmux(SCU_PB7_PINMUX_UART1_TX, 0);
+    hx_drv_uart_init((USE_DW_UART_E)XIAO_UART_ID, HX_UART1_BASE);
+    
+    g_uart1 = hx_drv_uart_get_dev((USE_DW_UART_E)XIAO_UART_ID);
+    if (g_uart1 == nullptr) {
+        xprintf("[UART] ERROR: Failed to get UART1 device!\n");
+        return EL_EPERM;
+    }
+    g_uart1->uart_open(UART_BAUDRATE_921600);
+    xprintf("[UART] UART1 (XIAO Connector) initialized at 921600 baud\n");
+    
+    g_output_uart = g_uart1;  // Default to UART1 for single-uart functions
+    xprintf("[UART] DUAL mode: Data will be sent to BOTH USB and XIAO Connector\n");
+    
+#elif defined(UART_USE_XIAO_CONNECTOR)
+    // Use UART1 on XIAO Connector (PB6=RX, PB7=TX)
+    xprintf("[UART] Initializing XIAO Connector UART1 (PB6=RX, PB7=TX)...\n");
+    
+    // Configure PB6 as UART1 RX, PB7 as UART1 TX
+    hx_drv_scu_set_PB6_pinmux(SCU_PB6_PINMUX_UART1_RX, 0);
+    hx_drv_scu_set_PB7_pinmux(SCU_PB7_PINMUX_UART1_TX, 0);
+    
+    // Initialize UART1
+    hx_drv_uart_init((USE_DW_UART_E)XIAO_UART_ID, HX_UART1_BASE);
+    
+    g_output_uart = hx_drv_uart_get_dev((USE_DW_UART_E)XIAO_UART_ID);
+    if (g_output_uart == nullptr) {
+        xprintf("[UART] ERROR: Failed to get UART1 device!\n");
+        return EL_EPERM;
+    }
+    
+    g_output_uart->uart_open(UART_BAUDRATE_921600);
+    xprintf("[UART] XIAO Connector UART1 initialized at 921600 baud\n");
+#else
+    // Use UART0 on USB Type-C (default debug UART)
+    xprintf("[UART] Using USB UART0 for output...\n");
+    
+    g_output_uart = hx_drv_uart_get_dev((USE_DW_UART_E)CONSOLE_UART_ID);
+    if (g_output_uart == nullptr) {
+        xprintf("[UART] ERROR: Failed to get UART0 device!\n");
+        return EL_EPERM;
+    }
+    
+    g_output_uart->uart_open(UART_BAUDRATE_921600);
+    xprintf("[UART] USB UART0 initialized at 921600 baud\n");
+#endif
+    
+    g_uart_output_initialized = true;
+    return EL_OK;
+}
+
+// Helper function to send via a single UART
+static void uart_write_all(DEV_UART* uart, const char* buffer, size_t size) {
+    size_t pos = 0;
+    while (size > 0) {
+        size_t bytes_to_send = (size < 64) ? size : 64;
+        uint32_t written = uart->uart_write(buffer + pos, bytes_to_send);
         if (written == 0) {
-            // Avoid busy loop if buffer is full
             continue;
         }
-        sent += written;
-        pos_of_bytes += written;
+        pos += written;
         size -= written;
     }
+}
 
-    //0 is ok(success)
-    //1 is again (fail)
-    return sent == pos_of_bytes ? EL_OK : EL_AGAIN;
+static el_err_code_t uart_send_bytes(const char* buffer, size_t size) {
+    if (!g_uart_output_initialized) {
+        uart_output_init();
+    }
+    
+#ifdef UART_USE_BOTH
+    // Send to BOTH UARTs
+    if (g_uart0 != nullptr) {
+        uart_write_all(g_uart0, buffer, size);
+    }
+    if (g_uart1 != nullptr) {
+        uart_write_all(g_uart1, buffer, size);
+    }
+    return EL_OK;
+#else
+    // Single UART mode
+    if (g_output_uart == nullptr) {
+        return EL_EPERM;
+    }
+    
+    uart_write_all(g_output_uart, buffer, size);
+    return EL_OK;
+#endif
+}
+#endif
+
+// ============================================================================
+// Unified send_bytes - sends to all enabled outputs
+// ============================================================================
+el_err_code_t send_bytes(const char* buffer, size_t size) {
+    el_err_code_t ret = EL_OK;
+    
+#ifdef OUTPUT_VIA_UART
+    el_err_code_t uart_ret = uart_send_bytes(buffer, size);
+    if (uart_ret != EL_OK) ret = uart_ret;
+#endif
+
+#ifdef OUTPUT_VIA_I2C
+    el_err_code_t i2c_ret = i2c_send_bytes(buffer, size);
+    if (i2c_ret != EL_OK) ret = i2c_ret;
+#endif
+
+    return ret;
 }
 
 
@@ -813,8 +1100,6 @@ void send_yolov8_pose_reid_results(
     // 1. Frame Info
     json_str += "\"frame_info\": {";
     snprintf(buf, sizeof(buf), "\"frame_no\": %d,", (int)frame_count);
-    json_str += buf;
-    snprintf(buf, sizeof(buf), "\"count\": %d,", (int)std::distance(el_keypoint_algo.begin(), el_keypoint_algo.end()));
     json_str += buf;
     snprintf(buf, sizeof(buf), "\"algo_tick\": %d", (int)algo_tick);
     json_str += buf;

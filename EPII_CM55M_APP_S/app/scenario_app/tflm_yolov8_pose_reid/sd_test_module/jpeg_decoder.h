@@ -18,6 +18,11 @@ typedef enum _nj_result {
 // Init the decoder
 void njInit(void);
 
+// Set external RGB buffer (must be at least 256*256*3 bytes)
+// If set, decoder will output to this buffer instead of allocating from tensor arena
+// Pass NULL to use default allocation
+void njSetExternalRGBBuffer(unsigned char* buf, int size);
+
 // Decode a JPEG image.
 // jpeg: pointer to the JPEG data
 // size: size of the JPEG data

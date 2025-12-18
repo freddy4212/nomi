@@ -177,6 +177,12 @@ void yolov8_pose_cal_xywh(int j,TfLiteTensor* output[7], box *bbox, float* ancho
     // if (xywh_result[2] > 256 || xywh_result[3] > 256) {
     //    xprintf("Large Box Raw: j=%d, stride=%f, w_grid=%f, h_grid=%f, w_px=%f, h_px=%f\n", j, stride_756_1[j], w, h, xywh_result[2], xywh_result[3]);
     // }
+    
+    // Debug DFL values for specific indices (matching the candidates we saw)
+    if (j >= 1299 && j <= 1316) {
+        xprintf("DFL Debug j=%d: l=%d, t=%d, r=%d, b=%d (Grid W=%d, H=%d)\n", 
+            j, (int)(xywh_result[0]*1000), (int)(xywh_result[1]*1000), (int)(xywh_result[2]*1000), (int)(xywh_result[3]*1000), (int)(w*1000), (int)(h*1000));
+    }
 
     bbox->x = xywh_result[0] - (0.5 * xywh_result[2]);
     bbox->y = xywh_result[1] - (0.5 * xywh_result[3]);
@@ -387,9 +393,9 @@ for(int dims_cnt_1=0;dims_cnt_1<dim_total_size;dims_cnt_1++)
 
         if (val_int8 < score_thresh_int8[thresh_idx]) {
              // Debug print for first few anchors
-             if (dims_cnt_1 < 5 || (dims_cnt_1 > out_dim_size[0] && dims_cnt_1 < out_dim_size[0] + 5)) {
-                 // xprintf("Skip: idx=%d, val=%d, thresh=%d\n", dims_cnt_1, val_int8, score_thresh_int8[thresh_idx]);
-             }
+             // if (dims_cnt_1 < 5 || (dims_cnt_1 > out_dim_size[0] && dims_cnt_1 < out_dim_size[0] + 5)) {
+             //    xprintf("Skip: idx=%d, val=%d, thresh=%d\n", dims_cnt_1, val_int8, score_thresh_int8[thresh_idx]);
+             // }
              continue; // Skip low confidence
         }
 

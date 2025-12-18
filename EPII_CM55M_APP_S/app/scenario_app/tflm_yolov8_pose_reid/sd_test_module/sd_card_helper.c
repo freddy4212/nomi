@@ -4,6 +4,7 @@
 #include "xprintf.h"
 #include "hx_drv_gpio.h"
 #include "hx_drv_scu.h"
+#include "WE2_core.h" // For hx_CleanDCache_by_Addr
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -17,6 +18,25 @@ static bool dir_opened = false;
 
 int g_sd_img_w = 0;
 int g_sd_img_h = 0;
+
+// Static buffer for decoded image in .bss.NoInit section (in CM55M_S_SRAM, NOT in CM55M_S_APP_DATA!)
+// This section is placed AFTER tensor_arena in the linker script, so it won't be overwritten by AllocateTensors()
+// Size: 256*256*3 = 196608 bytes for RGB image
+#define DECODED_IMAGE_BUF_SIZE (256*256*3)
+__attribute__((section(".bss.NoInit"))) static uint8_t g_decoded_image_buf[DECODED_IMAGE_BUF_SIZE];
+static bool g_decoded_image_valid = false;
+static int g_decoded_image_size = 0;
+
+uint8_t* sd_get_decoded_image(void) { 
+    return g_decoded_image_valid ? g_decoded_image_buf : NULL; 
+}
+int sd_get_decoded_image_size(void) { return g_decoded_image_size; }
+
+void sd_release_decoded_image(void) {
+    // No need to free, just mark as invalid
+    g_decoded_image_valid = false;
+    g_decoded_image_size = 0;
+}
 
 // GPIO configuration for SD card (SPI mode)
 // These functions are already defined in drivers/spi_fatfs.c
@@ -163,6 +183,11 @@ int sd_card_read_image(const char *filename, uint8_t *buffer, uint32_t buffer_si
 
         // It's a JPEG, decode it
         xprintf("Decoding JPEG...\n");
+        
+        // CRITICAL: Set external buffer BEFORE decode so RGB output goes to safe buffer!
+        // This avoids the reinit problem entirely
+        njSetExternalRGBBuffer(g_decoded_image_buf, DECODED_IMAGE_BUF_SIZE);
+        
         nj_result_t nj_res = njDecode(file_buf, file_size);
         if (nj_res != NJ_OK) {
             xprintf("JPEG decode failed: %d\n", nj_res);
@@ -178,15 +203,57 @@ int sd_card_read_image(const char *filename, uint8_t *buffer, uint32_t buffer_si
         int img_size = njGetImageSize();
 
         xprintf("Decoded: %dx%d, size: %d\n", w, h, img_size);
-
-        // Use memmove instead of memcpy because buffer (raw_addr) and img (nj.rgb) 
-        // might overlap in the shared tensor arena.
-        if (img_size <= buffer_size) {
-            memmove(buffer, img, img_size);
-        } else {
-            xprintf("Buffer too small! Needed %d, got %d\n", img_size, buffer_size);
-            memmove(buffer, img, buffer_size); // Copy what fits
+        
+        // Debug: print first 12 bytes of decoded image (first 4 pixels)
+        xprintf("Decoded img first 12 bytes: %d %d %d | %d %d %d | %d %d %d | %d %d %d\n",
+                img[0], img[1], img[2], img[3], img[4], img[5],
+                img[6], img[7], img[8], img[9], img[10], img[11]);
+        // Debug: print center pixel
+        int center_offset = (h/2 * w + w/2) * 3;
+        xprintf("Decoded img center pixel: %d %d %d\n", 
+                img[center_offset], img[center_offset+1], img[center_offset+2]);
+        
+        // Debug: Calculate image statistics to verify content
+        uint32_t sum_r = 0, sum_g = 0, sum_b = 0;
+        int num_unique = 0;
+        uint8_t last_r = img[0], last_g = img[1], last_b = img[2];
+        for (int p = 0; p < w * h; p++) {
+            sum_r += img[p*3];
+            sum_g += img[p*3+1];
+            sum_b += img[p*3+2];
+            if (img[p*3] != last_r || img[p*3+1] != last_g || img[p*3+2] != last_b) {
+                num_unique++;
+                last_r = img[p*3]; last_g = img[p*3+1]; last_b = img[p*3+2];
+            }
         }
+        int total = w * h;
+        xprintf("Decoded img stats: AvgR=%d, AvgG=%d, AvgB=%d, ColorChanges=%d\n",
+                (int)(sum_r/total), (int)(sum_g/total), (int)(sum_b/total), num_unique);
+
+        // Check if decode went to our external buffer (it should!)
+        if (img == g_decoded_image_buf) {
+            g_decoded_image_size = img_size;
+            g_decoded_image_valid = true;
+            xprintf("RGB output directly to safe buffer - no copy needed!\n");
+        } else {
+            // Fallback: copy if it didn't use our buffer
+            if (img_size <= DECODED_IMAGE_BUF_SIZE) {
+                memcpy(g_decoded_image_buf, img, img_size);
+                g_decoded_image_size = img_size;
+                g_decoded_image_valid = true;
+                xprintf("Copied decoded image to safe buffer at %p\n", g_decoded_image_buf);
+            } else {
+                xprintf("ERROR: Decoded image too large! %d > %d\n", img_size, DECODED_IMAGE_BUF_SIZE);
+                g_decoded_image_valid = false;
+                g_decoded_image_size = 0;
+            }
+        }
+        
+        // Flush cache
+        if (g_decoded_image_valid) {
+            hx_CleanDCache_by_Addr((volatile void *)g_decoded_image_buf, g_decoded_image_size);
+        }
+        
     } else {
         // Assume RAW
         xprintf("Reading RAW...\n");

@@ -73,6 +73,11 @@
 #include "sd_card_helper.h"
 #endif
 
+// I2C/UART output support
+#ifdef OUTPUT_VIA_I2C
+extern void output_init(void);
+#endif
+
 // #define USE_SD_CARD_INPUT 1
 
 // #ifdef EPII_FPGA
@@ -855,6 +860,11 @@ static void dp_app_cv_yolov8_pose_eventhdl_cb(EVT_INDEX_E event)
 
 void app_start_state(APP_STATE_E state)
 {
+	// Initialize output interface (I2C and/or UART based on compile options)
+#ifdef OUTPUT_VIA_I2C
+	output_init();
+#endif
+
 	if(cisdp_sensor_init() < 0)
 	{
 		xprintf("\r\nCIS Init fail\r\n");
