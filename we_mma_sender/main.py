@@ -16,6 +16,7 @@ main.py - WE_MMA_Sender 主程式入口
 import base64
 import json
 import os
+import queue
 import socket
 import sys
 import threading
@@ -25,6 +26,10 @@ from typing import Any, Dict, List, Optional
 
 import cv2
 import numpy as np
+
+# 抑制 OpenCV 警告 (尤其是 macOS 上的 AVFoundation 警告)
+os.environ["OPENCV_LOG_LEVEL"] = "ERROR"
+os.environ["OPENCV_VIDEOIO_PRIORITY_BACKEND"] = "AVFOUNDATION"
 
 # 處理直接執行和作為模組執行的情況
 if __name__ == "__main__" or __package__ is None:
@@ -197,11 +202,23 @@ class WE_MMA_Sender_App:
         # 當前來源
         self.current_source = "wifi"
         
+        # 停止事件
+        self.app_stop_event = threading.Event()
+        
+        # 模擬設定
+        self.floating_fps_enabled = config.webcam.floating_fps
+        self.random_blocking_enabled = config.webcam.random_blocking
+        
         # 統計
         self.total_frames = 0
         self.fps_start_time = time.time()
         self.frame_count = 0
         self.current_fps = 0.0
+        
+        # 網路發送佇列與執行緒
+        self.send_queue = queue.Queue(maxsize=30)
+        self.network_thread = threading.Thread(target=self._network_sender_loop, daemon=True)
+        self.network_thread.start()
         
         # 設定 GUI 回調
         self._setup_gui_callbacks()
@@ -238,6 +255,8 @@ class WE_MMA_Sender_App:
         self.gui.on_webcam_fps_change = self._on_webcam_fps_change
         self.gui.on_webcam_camera_change = self._on_webcam_camera_change
         self.gui.on_webcam_reid_toggle = self._on_webcam_reid_toggle
+        self.gui.on_webcam_floating_fps_toggle = self._on_webcam_floating_fps_toggle
+        self.gui.on_webcam_random_blocking_toggle = self._on_webcam_random_blocking_toggle
         self.gui.on_webcam_yolo_change = self._on_webcam_yolo_change
     
     def _on_receiver_connection_changed(self, connected: bool):
@@ -351,6 +370,20 @@ class WE_MMA_Sender_App:
         if self.webcam_source:
             self.webcam_source.set_reid_enabled(enabled)
         self.debug_log(f"ReID {'enabled' if enabled else 'disabled'}")
+            
+    def _on_webcam_floating_fps_toggle(self, enabled: bool):
+        """Webcam 浮動採樣率開關變更"""
+        self.floating_fps_enabled = enabled
+        if self.webcam_source:
+            self.webcam_source.set_floating_fps(enabled)
+        self.debug_log(f"Floating FPS {'enabled' if enabled else 'disabled'} (Network level)")
+            
+    def _on_webcam_random_blocking_toggle(self, enabled: bool):
+        """Webcam 隨機阻塞開關變更"""
+        self.random_blocking_enabled = enabled
+        if self.webcam_source:
+            self.webcam_source.set_random_blocking(enabled)
+        self.debug_log(f"Random blocking {'enabled' if enabled else 'disabled'} (Network level)")
     
     def _on_webcam_yolo_change(self, model_name: str) -> bool:
         """Webcam YOLO 模型切換"""
@@ -389,7 +422,6 @@ class WE_MMA_Sender_App:
         """更新 Webcam 預覽"""
         if self.webcam_source and self.webcam_source.is_running:
             # 固定使用採樣幀率預覽（一卡一卡的效果）
-            # 但如果 preview_frame 還沒準備好，先用 latest_frame
             frame = self.webcam_source.get_preview_frame()
             keypoints = self.webcam_source.get_preview_keypoints()
             
@@ -423,18 +455,75 @@ class WE_MMA_Sender_App:
         self.total_frames += 1
         self._update_fps()
         
-        # 建立要發送的資料
-        send_data = self._create_send_data(frame_data)
+        # 放入發送佇列（如果佇列滿了就丟棄最舊的，確保即時性）
+        try:
+            if self.send_queue.full():
+                self.send_queue.get_nowait()
+            self.send_queue.put_nowait(frame_data)
+        except queue.Full:
+            pass
         
-        # 發送到接收端
-        if self.network_sender.is_receiver_connected():
-            success = self.network_sender.send(send_data)
-            if success:
-                self.root.after(0, self.gui.update_send_status, 
-                              f"已發送 {self.network_sender.sent_count} 幀")
+        # 更新統計 (只傳遞必要資訊，避免在主執行緒處理大物件)
+        stats_info = {
+            'basic_info': frame_data.basic_info
+        }
+        self.root.after(0, self._update_stats, stats_info)
+    
+    def _network_sender_loop(self):
+        """網路發送執行緒主迴圈 - 負責模擬網路不穩與浮動幀率"""
+        self.debug_log("Network sender loop started")
         
-        # 更新統計
-        self.root.after(0, self._update_stats, frame_data)
+        jitter_factor = 1.0
+        last_jitter_update = 0
+        
+        while not self.app_stop_event.is_set():
+            try:
+                # 從佇列獲取原始幀資料
+                frame_data = self.send_queue.get(timeout=0.5)
+                
+                # 在此執行緒進行影像編碼，減輕採樣執行緒負擔並增加穩定性
+                send_data = self._create_send_data(frame_data)
+                
+                current_time = time.time()
+                
+                # 1. 模擬隨機阻塞 (1% 機率發生 0.5~1.5 秒的停頓)
+                if self.random_blocking_enabled and np.random.random() < 0.01:
+                    block_duration = np.random.uniform(0.5, 1.5)
+                    self.debug_log(f"⚠️ [Network] 模擬隨機阻塞 {block_duration:.2f} 秒...")
+                    time.sleep(block_duration)
+                
+                # 2. 模擬浮動採樣率 (控制發送間隔)
+                if self.floating_fps_enabled:
+                    # 每秒更新一次隨機抖動因子 (0.85 ~ 2.25)
+                    if current_time - last_jitter_update > 1.0:
+                        jitter_factor = np.random.uniform(0.85, 2.25)
+                        last_jitter_update = current_time
+                    
+                    # 根據目標 FPS 計算應有的間隔
+                    target_fps = config.webcam.default_fps
+                    if self.webcam_source:
+                        target_fps = self.webcam_source.target_fps
+                    
+                    effective_fps = target_fps * jitter_factor
+                    # 模擬發送延遲
+                    time.sleep(1.0 / max(0.1, effective_fps))
+                
+                # 發送到接收端
+                if self.network_sender.is_receiver_connected():
+                    success = self.network_sender.send(send_data)
+                    if success:
+                        self.root.after(0, self.gui.update_send_status, 
+                                      f"已發送 {self.network_sender.sent_count} 幀")
+                
+                self.send_queue.task_done()
+                
+            except queue.Empty:
+                continue
+            except Exception as e:
+                self.debug_log(f"Network sender error: {e}")
+                time.sleep(0.1)
+        
+        self.debug_log("Network sender loop ended")
     
     def _create_send_data(self, frame_data: FrameData) -> Dict[str, Any]:
         """
@@ -475,13 +564,13 @@ class WE_MMA_Sender_App:
             self.frame_count = 0
             self.fps_start_time = time.time()
     
-    def _update_stats(self, frame_data: FrameData):
+    def _update_stats(self, stats_info: Dict):
         """更新統計（在主執行緒中調用）"""
         if self.current_source == "serial" and self.serial_source:
             self.gui.update_serial_stats(
                 self.total_frames,
                 self.serial_source.get_fps(),
-                frame_data.basic_info
+                stats_info.get('basic_info')
             )
     
     def run(self):
@@ -506,6 +595,7 @@ class WE_MMA_Sender_App:
         """清理資源"""
         self.debug_log("Cleaning up...")
         
+        self.app_stop_event.set()
         self._stop_webcam_preview()
         
         if self.serial_source:

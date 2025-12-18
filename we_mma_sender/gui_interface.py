@@ -82,6 +82,8 @@ class SenderGUIInterface:
         self.on_webcam_fps_change: Optional[Callable[[float], None]] = None
         self.on_webcam_camera_change: Optional[Callable[[int], bool]] = None
         self.on_webcam_reid_toggle: Optional[Callable[[bool], None]] = None
+        self.on_webcam_floating_fps_toggle: Optional[Callable[[bool], None]] = None
+        self.on_webcam_random_blocking_toggle: Optional[Callable[[bool], None]] = None
         self.on_webcam_yolo_change: Optional[Callable[[str], bool]] = None
         self.get_serial_ports: Optional[Callable[[], List[str]]] = None
         self.get_camera_options: Optional[Callable[[], List[str]]] = None
@@ -358,6 +360,25 @@ class SenderGUIInterface:
             )
             btn.pack(side=tk.LEFT, padx=3, expand=True)
         
+        # 浮動採樣率
+        self.floating_fps_var = tk.BooleanVar(value=config.webcam.floating_fps)
+        self.chk_floating_fps = ttk.Checkbutton(
+            fps_group,
+            text="模擬浮動採樣率 (WiseEye2 特性)",
+            variable=self.floating_fps_var,
+            command=self._on_floating_fps_toggle
+        )
+        self.chk_floating_fps.pack(anchor=tk.W, pady=2)
+        
+        self.random_blocking_var = tk.BooleanVar(value=config.webcam.random_blocking)
+        self.chk_random_blocking = ttk.Checkbutton(
+            fps_group,
+            text="模擬隨機阻塞 (網路/處理延遲)",
+            variable=self.random_blocking_var,
+            command=self._on_random_blocking_toggle
+        )
+        self.chk_random_blocking.pack(anchor=tk.W, pady=2)
+        
         # ReID 控制
         reid_group = ttk.LabelFrame(right_frame, text="ReID 設定", padding=10)
         reid_group.pack(fill=tk.X, pady=5)
@@ -501,6 +522,20 @@ class SenderGUIInterface:
             self.on_webcam_reid_toggle(enabled)
         status = "已啟用 (256-dim)" if enabled else "已停用"
         self.lbl_reid_status.config(text=f"ReID: {status}")
+    
+    def _on_floating_fps_toggle(self):
+        """浮動採樣率開關切換"""
+        enabled = self.floating_fps_var.get()
+        self.debug_log(f"Floating FPS toggle: {enabled}")
+        if self.on_webcam_floating_fps_toggle:
+            self.on_webcam_floating_fps_toggle(enabled)
+            
+    def _on_random_blocking_toggle(self):
+        """隨機阻塞開關切換"""
+        enabled = self.random_blocking_var.get()
+        self.debug_log(f"Random blocking toggle: {enabled}")
+        if self.on_webcam_random_blocking_toggle:
+            self.on_webcam_random_blocking_toggle(enabled)
     
     def _on_yolo_model_selected(self, event=None):
         """YOLO 模型選擇變更"""

@@ -47,6 +47,8 @@ class WebcamConfig:
     default_fps: float = 2.0
     min_fps: float = 0.5
     max_fps: float = 30.0
+    floating_fps: bool = False  # 是否啟用浮動採樣率
+    random_blocking: bool = False  # 是否啟用隨機阻塞
     yolo_model: str = ""  # 將在 __post_init__ 中設定
     yolo_conf: float = 0.5
     reid_enabled: bool = True  # 是否預設啟用 ReID

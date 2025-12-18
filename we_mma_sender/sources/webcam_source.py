@@ -76,9 +76,12 @@ class WebcamSource:
         # FPS 控制
         self.target_fps = config.webcam.default_fps
         self.last_capture_time = 0.0
+        self.floating_fps_enabled = config.webcam.floating_fps
+        self.random_blocking_enabled = config.webcam.random_blocking
         
         # 執行緒
         self.capture_thread: Optional[threading.Thread] = None
+        self.data_lock = threading.Lock()
         
         # 回調函數
         self.on_frame_received = on_frame_received
@@ -105,13 +108,27 @@ class WebcamSource:
     def detect_cameras(self) -> List[Dict]:
         """偵測可用的攝像頭"""
         cameras = []
-        for i in range(10):
-            cap = cv2.VideoCapture(i)
-            if cap.isOpened():
-                w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                cameras.append({'id': i, 'resolution': f"{w}x{h}"})
-                cap.release()
+        # 減少偵測範圍，並在連續失敗時停止，避免 macOS 上的警告與延遲
+        max_failed = 2
+        failed_count = 0
+        
+        for i in range(6):
+            try:
+                cap = cv2.VideoCapture(i)
+                if cap.isOpened():
+                    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                    cameras.append({'id': i, 'resolution': f"{w}x{h}"})
+                    cap.release()
+                    failed_count = 0
+                else:
+                    failed_count += 1
+            except:
+                failed_count += 1
+            
+            if failed_count >= max_failed:
+                break
+                
         self.available_cameras = cameras
         return cameras
     
@@ -216,6 +233,16 @@ class WebcamSource:
         self.target_fps = max(config.webcam.min_fps, min(fps, config.webcam.max_fps))
         self.debug_log(f"採樣率設定為 {self.target_fps:.1f} FPS")
     
+    def set_floating_fps(self, enabled: bool):
+        """設定是否啟用浮動採樣率"""
+        self.floating_fps_enabled = enabled
+        self.debug_log(f"浮動採樣率 {'已啟用' if enabled else '已停用'}")
+    
+    def set_random_blocking(self, enabled: bool):
+        """設定是否啟用隨機阻塞"""
+        self.random_blocking_enabled = enabled
+        self.debug_log(f"隨機阻塞 {'已啟用' if enabled else '已停用'}")
+    
     def get_fps(self) -> float:
         """獲取當前實際 FPS"""
         return self.current_fps
@@ -227,6 +254,13 @@ class WebcamSource:
             self.reid_extractor = ReIDExtractor()
         self.debug_log(f"ReID {'已啟用' if enabled else '已停用'}")
     
+    def get_preview_data(self) -> Tuple[Optional[np.ndarray], List[Any]]:
+        """安全地獲取預覽資料"""
+        with self.data_lock:
+            if self.preview_frame is None:
+                return None, []
+            return self.preview_frame.copy(), self.preview_keypoints
+            
     def _capture_loop(self):
         """捕捉執行緒主迴圈"""
         self.debug_log("Capture loop started")
@@ -256,7 +290,8 @@ class WebcamSource:
             
             # 水平翻轉（鏡像效果）
             frame = cv2.flip(frame, 1)
-            self.latest_frame = frame.copy()
+            with self.data_lock:
+                self.latest_frame = frame.copy()
             
             # 檢查是否到達採樣時間
             should_capture = (current_time - self.last_capture_time) >= time_interval
@@ -274,7 +309,8 @@ class WebcamSource:
                 
                 # 格式化關鍵點（WiseEye2 格式）
                 keypoints_formatted = self._format_keypoints(keypoints_raw, boxes_raw)
-                self.latest_keypoints = keypoints_formatted
+                with self.data_lock:
+                    self.latest_keypoints = keypoints_formatted
                 
                 # 提取 ReID 特徵
                 reid_start = time.time()
@@ -282,11 +318,13 @@ class WebcamSource:
                 if self.reid_enabled and self.reid_extractor and len(boxes_raw) > 0:
                     reid_results = self._extract_reid_features(frame, boxes_raw)
                 reid_time = (time.time() - reid_start) * 1000
-                self.latest_reid_results = reid_results
+                with self.data_lock:
+                    self.latest_reid_results = reid_results
                 
                 # 更新預覽幀（只在採樣時更新，產生一卡一卡的效果）
-                self.preview_frame = frame.copy()
-                self.preview_keypoints = keypoints_formatted
+                with self.data_lock:
+                    self.preview_frame = frame.copy()
+                    self.preview_keypoints = keypoints_formatted
                 
                 # 建立 FrameData
                 frame_data = self._create_frame_data(frame, keypoints_formatted, reid_results)
@@ -436,23 +474,28 @@ class WebcamSource:
     
     def get_preview_frame(self) -> Optional[np.ndarray]:
         """獲取預覽用的幀（與採樣率同步，一卡一卡的效果）"""
-        return self.preview_frame
+        with self.data_lock:
+            return self.preview_frame.copy() if self.preview_frame is not None else None
     
     def get_latest_frame(self) -> Optional[np.ndarray]:
         """獲取最新的攝像頭幀（實時）"""
-        return self.latest_frame
+        with self.data_lock:
+            return self.latest_frame.copy() if self.latest_frame is not None else None
     
     def get_preview_keypoints(self) -> List[Any]:
         """獲取預覽用的骨架關鍵點"""
-        return self.preview_keypoints
+        with self.data_lock:
+            return self.preview_keypoints
     
     def get_latest_keypoints(self) -> List[Any]:
         """獲取最新的骨架關鍵點"""
-        return self.latest_keypoints
+        with self.data_lock:
+            return self.latest_keypoints
     
     def get_latest_reid_results(self) -> List[Any]:
         """獲取最新的 ReID 結果"""
-        return self.latest_reid_results
+        with self.data_lock:
+            return self.latest_reid_results
     
     def get_status(self) -> str:
         """獲取狀態資訊"""
