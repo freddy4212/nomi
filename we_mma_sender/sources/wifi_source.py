@@ -216,68 +216,81 @@ class WiFiSource:
                 
                 try:
                     line = line_bytes.decode('utf-8').strip()
+                    
+                    # 基本 JSON 完整性檢查
+                    if not line.startswith('{') or not line.endswith('}'):
+                        # 不完整的 JSON，跳過
+                        if len(line) > 50:
+                            print(f"[WiFi] Incomplete JSON (len={len(line)}): {line[:30]}...{line[-20:]}")
+                        continue
+                    
+                    # 檢查大括號是否平衡
+                    if line.count('{') != line.count('}'):
+                        print(f"[WiFi] Unbalanced braces: {{ ={line.count('{')}, }} ={line.count('}')}")
+                        continue
+                    
                     frame_data = self._parse_line(line)
                     
                     if frame_data and self.on_frame_received:
                         self._update_fps()
                         self.on_frame_received(frame_data)
                         
-                except UnicodeDecodeError:
-                    pass
+                except UnicodeDecodeError as e:
+                    print(f"[WiFi] Decode error: {e}")
                     
             except queue.Empty:
                 continue
             except Exception as e:
-                self.debug_log(f"Process error: {e}")
+                print(f"[WiFi] Error: {e}")
                 
         self.debug_log("Process thread ended")
     
     def _parse_line(self, line: str) -> Optional[FrameData]:
-        """解析一行 JSON 資料（來自 ESP32 轉發的 Vision AI 資料）"""
+        """解析一行 JSON 資料（來自 ESP32 轉發的 WE2 原始 JSON 資料）"""
         if not line.startswith('{'):
             return None
             
         try:
             data = json.loads(line)
             
-            # ESP32 轉發的資料格式：
-            # {"perf": {...}, "boxes": [...], "classes": [...], "keypoints": [...], "points": [...], "timestamp": ...}
+            # ESP32 直接轉發 WE2 的原始 JSON 格式：
+            # {"frame_info": {...}, "basic_info": {...}, "image": "...", "keypoints": [...], "reid_results": [...]}
+            inner_data = data
+            if data.get("name") == "INVOKE" and "data" in data:
+                inner_data = data["data"]
             
             # 解析影像（如果有的話）
             image = None
-            if "image" in data:
+            if "image" in inner_data:
                 try:
-                    img_b64 = data["image"]
+                    img_b64 = inner_data["image"]
                     img_bytes = base64.b64decode(img_b64)
                     np_arr = np.frombuffer(img_bytes, np.uint8)
                     image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
                 except Exception as e:
                     self.debug_log(f"Image decode error: {e}")
             
-            # 轉換 keypoints 格式以匹配預期結構
-            keypoints = []
-            for kp in data.get("keypoints", []):
-                keypoint_entry = {
-                    "box": kp.get("box", {}),
-                    "points": kp.get("points", [])
-                }
-                keypoints.append(keypoint_entry)
+            # 取得 frame_info（與 serial_source 相同格式）
+            frame_info = inner_data.get("frame_info", {})
+            if isinstance(frame_info, dict):
+                frame_info["source"] = "wifi"
+            else:
+                frame_info = {"source": "wifi"}
             
-            frame_info = {
-                "source": "wifi",
-                "perf": data.get("perf", {}),
-                "esp32_timestamp": data.get("timestamp", 0)
-            }
+            # keypoints 直接使用 WE2 原始格式（list）
+            keypoints = inner_data.get("keypoints", [])
+            if not isinstance(keypoints, list):
+                keypoints = []
             
             frame_data = FrameData(
                 timestamp=time.time(),
-                frame_no=self.frame_count,
+                frame_no=frame_info.get("frame_no", inner_data.get("frame_no", self.frame_count)),
                 image=image,
                 keypoints=keypoints,
-                reid_results=[],  # ESP32 不傳 reid
-                basic_info={},
+                reid_results=inner_data.get("reid_results", []),
+                basic_info=inner_data.get("basic_info", {}),
                 frame_info=frame_info,
-                raw_data=data
+                raw_data=inner_data
             )
             
             if keypoints:
@@ -286,7 +299,7 @@ class WiFiSource:
             return frame_data
             
         except json.JSONDecodeError as e:
-            self.debug_log(f"JSON parse error: {e}")
+            print(f"[WiFi] JSON error at {e.pos}: {e.msg}")
             return None
     
     def _update_fps(self):

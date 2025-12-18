@@ -231,6 +231,9 @@ class WebcamSource:
         """捕捉執行緒主迴圈"""
         self.debug_log("Capture loop started")
         
+        # 追蹤實際處理時間
+        processing_times = []
+        
         while not self.stop_event.is_set() and self.is_running:
             current_time = time.time()
             time_interval = 1.0 / self.target_fps
@@ -292,9 +295,20 @@ class WebcamSource:
                 total_time = (time.time() - capture_start) * 1000
                 max_fps = 1000.0 / total_time if total_time > 0 else 999
                 
+                # 追蹤處理時間，用於計算平均值
+                processing_times.append(total_time)
+                if len(processing_times) > 30:
+                    processing_times.pop(0)
+                avg_processing_time = sum(processing_times) / len(processing_times)
+                achievable_fps = 1000.0 / avg_processing_time if avg_processing_time > 0 else 999
+                
                 # 每 30 幀輸出一次效能資訊
                 if self.total_frame_count % 30 == 0:
-                    self.debug_log(f"處理時間: YOLO={yolo_time:.1f}ms, ReID={reid_time:.1f}ms, 總計={total_time:.1f}ms, 最大可達 FPS={max_fps:.1f}")
+                    target_interval_ms = 1000.0 / self.target_fps
+                    if avg_processing_time > target_interval_ms:
+                        self.debug_log(f"⚠️ 處理時間 ({avg_processing_time:.0f}ms) > 目標間隔 ({target_interval_ms:.0f}ms)，最大可達 FPS={achievable_fps:.1f}")
+                    else:
+                        self.debug_log(f"✓ YOLO={yolo_time:.1f}ms, ReID={reid_time:.1f}ms, 平均={avg_processing_time:.0f}ms, 可達 FPS={achievable_fps:.1f}")
                 
                 # 更新統計
                 self._update_fps()

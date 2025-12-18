@@ -97,7 +97,11 @@ class NetworkSender:
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.socket.settimeout(5.0)
             self.socket.connect((self.receiver_host, self.receiver_port))
-            self.socket.settimeout(5.0)  # 發送超時
+            
+            # 設定 TCP_NODELAY 減少延遲
+            self.socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            
+            self.socket.settimeout(2.0)  # 發送超時縮短到 2 秒
             self.is_connected = True
             self.debug_log(f"Connected to receiver at {self.receiver_host}:{self.receiver_port}")
             
@@ -267,7 +271,7 @@ class WE_MMA_Sender_App:
         return success
     
     def _on_wifi_stop(self):
-        """WiFi 停止監聽"""
+        """WiFi 停止監聯"""
         if self.wifi_source:
             self.wifi_source.stop()
             self.wifi_source = None
