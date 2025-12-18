@@ -151,16 +151,46 @@ class Visualizer:
 class SkeletonPlayer:
     """
     骨架序列播放器 - 負責管理補幀緩衝區的播放進度
-    包含智慧播放速度控制邏輯，確保畫面流暢
+    
+    改進版本：
+    - 使用追加式緩衝區，避免覆蓋導致的跳幀
+    - 智慧播放速度控制，根據緩衝區深度自動調整
+    - 支援變動幀率的輸入源
     """
     def __init__(self, processor=None):
         self.processor = processor
-        self.buffer = [] # 內部緩衝區 (當沒有 processor 時使用)
-        self.play_index = 0.0
+        self.buffer = []  # 內部緩衝區
+        self.play_index = 0
+        self.last_frame = None  # 快取最後一幀，用於緩衝區空時顯示
+        self.frames_played = 0
+        self.buffer_low_count = 0  # 連續緩衝區過低的次數
         
-    def set_buffer(self, buffer):
-        """手動設置緩衝區 (當沒有 processor 時使用)"""
-        self.buffer = buffer
+    def set_buffer(self, new_frames: list):
+        """
+        追加新幀到緩衝區（而非覆蓋）
+        
+        Args:
+            new_frames: 新的補幀列表
+        """
+        if not new_frames:
+            return
+            
+        # 找出真正新的幀（避免重複添加）
+        if self.buffer:
+            # 比較 timestamp 來判斷是否為新幀
+            last_ts = self.buffer[-1].timestamp if self.buffer else 0
+            new_frames = [f for f in new_frames if f.timestamp > last_ts]
+        
+        if new_frames:
+            self.buffer.extend(new_frames)
+            
+            # 限制緩衝區最大長度，保留最新的幀
+            max_buffer_size = 120  # 約 4 秒的 30 FPS
+            if len(self.buffer) > max_buffer_size:
+                # 調整 play_index
+                overflow = len(self.buffer) - max_buffer_size
+                self.buffer = self.buffer[overflow:]
+                self.play_index = max(0, self.play_index - overflow)
         
     def get_next_frame(self):
         """
@@ -170,43 +200,90 @@ class SkeletonPlayer:
             SkeletonFrame or None
         """
         if self.processor:
-            buffer = self.processor.get_interpolated_frames()
-        else:
-            buffer = self.buffer
+            # 從 processor 取得新幀並追加
+            new_frames = self.processor.get_interpolated_frames()
+            self.set_buffer(new_frames)
             
-        if not buffer:
-            return None
+        if not self.buffer:
+            return self.last_frame  # 緩衝區空時，返回最後一幀
             
-        buffer_len = len(buffer)
+        buffer_len = len(self.buffer)
+        remaining = buffer_len - self.play_index
         
-        # 如果播放索引超過緩衝區長度，則停留在最後一幀
+        # 緩衝區已經播放完畢
         if self.play_index >= buffer_len:
-            self.play_index = float(buffer_len - 1)
+            self.buffer_low_count += 1
+            return self.last_frame
         
         # 獲取當前幀
         try:
-            target_frame = buffer[int(self.play_index)]
+            target_frame = self.buffer[self.play_index]
+            self.last_frame = target_frame
+            self.frames_played += 1
         except IndexError:
-            target_frame = buffer[-1]
-            self.play_index = float(buffer_len - 1)
+            return self.last_frame
             
         # 智慧播放速度控制
-        # 如果緩衝區很滿 (>15幀)，全速播放 (1.2x)
-        # 如果緩衝區快空了 (<5幀)，減速播放 (0.5x) 以等待下一批幀
-        remaining = buffer_len - self.play_index
-        
-        if remaining < 5:
-            step = 0.5
-        elif remaining > 15:
-            step = 1.2
+        # 根據緩衝區剩餘量動態調整播放速度
+        if remaining <= 2:
+            # 緩衝區快空了，暫停等待新幀
+            self.buffer_low_count += 1
+            # 不增加 play_index，等待緩衝區補充
+            if self.buffer_low_count < 3:
+                return target_frame
+            # 如果連續多次緩衝區過低，才往前推進
+            step = 1
+        elif remaining <= 5:
+            # 緩衝區較少，減速播放
+            step = 1
+            self.buffer_low_count = 0
+        elif remaining <= 15:
+            # 緩衝區正常，正常速度
+            step = 1
+            self.buffer_low_count = 0
+        elif remaining <= 30:
+            # 緩衝區較多，稍微加速
+            step = 1
+            self.buffer_low_count = 0
         else:
-            step = 1.0
+            # 緩衝區太滿，快速消耗
+            step = 2
+            self.buffer_low_count = 0
             
         self.play_index += step
         
+        # 定期清理已播放的舊幀，釋放記憶體
+        if self.play_index > 60:
+            cleanup_count = self.play_index - 30
+            self.buffer = self.buffer[cleanup_count:]
+            self.play_index -= cleanup_count
+        
         return target_frame
     
+    def get_buffer_status(self) -> dict:
+        """獲取緩衝區狀態（用於調試）"""
+        return {
+            "buffer_size": len(self.buffer),
+            "play_index": self.play_index,
+            "remaining": len(self.buffer) - self.play_index,
+            "frames_played": self.frames_played,
+            "buffer_low_count": self.buffer_low_count
+        }
+    
     def reset(self):
-        """重置播放狀態"""
-        self.play_index = 0.0
-
+        """重置播放狀態（但保留緩衝區）"""
+        # 不清空緩衝區，只重置播放位置到最新位置
+        if self.buffer:
+            # 從最新幀開始播放
+            self.play_index = max(0, len(self.buffer) - 1)
+        else:
+            self.play_index = 0
+        self.buffer_low_count = 0
+        
+    def clear(self):
+        """完全清空緩衝區和狀態"""
+        self.buffer = []
+        self.play_index = 0
+        self.last_frame = None
+        self.frames_played = 0
+        self.buffer_low_count = 0

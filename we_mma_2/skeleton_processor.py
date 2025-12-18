@@ -285,7 +285,8 @@ class SkeletonProcessor:
         self.raw_buffer: deque = deque(maxlen=config.interpolation.buffer_size)
         
         # 補幀後的序列緩衝區（用於動作識別）
-        self.interpolated_buffer: deque = deque(maxlen=config.interpolation.sequence_length)
+        # 增大緩衝區以支援流暢播放（約 8 秒的 15 FPS）
+        self.interpolated_buffer: deque = deque(maxlen=120)
         
         # 使用專業的骨架預處理器（包含 One Euro Filter + 解剖學約束 + Cubic Spline 插值）
         self.preprocessor = SkeletonPreprocessor(
