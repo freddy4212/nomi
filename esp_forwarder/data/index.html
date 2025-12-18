@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- 主題色：Android Chrome、Edge -->
+    <meta name="theme-color" content="#1a1a2e">
+    <!-- iOS Safari 狀態列 -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <!-- Windows/Edge -->
+    <meta name="msapplication-navbutton-color" content="#1a1a2e">
+    <meta name="msapplication-TileColor" content="#1a1a2e">
+    <title>NOMI Agent 設定</title>
+    <style>
+        :root {
+            /* 主題色 */
+            --primary: #00d9ff;
+            --primary-rgb: 0, 217, 255;
+            --secondary: #00ff88;
+            --secondary-rgb: 0, 255, 136;
+            --danger: #ff6464;
+            --danger-rgb: 255, 100, 100;
+            --danger-dark: #ee5a24;
+            
+            /* 背景色 */
+            --bg-dark: #1a1a2e;
+            --bg-light: #16213e;
+            
+            /* 文字色 */
+            --text: #fff;
+            --text-muted: #888;
+            --text-label: #aaa;
+        }
+        
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html {
+            background-color: var(--bg-dark);
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, var(--bg-dark) 0%, var(--bg-light) 100%);
+            min-height: 100vh;
+            min-height: 100dvh;
+            color: var(--text);
+            padding: 20px;
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            -webkit-touch-callout: none;
+        }
+        .container { max-width: 600px; margin: 0 auto; }
+        h1 {
+            text-align: center;
+            margin-bottom: 25px;
+            font-size: 1.8em;
+            background: linear-gradient(90deg, var(--primary), var(--secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        /* 狀態卡片 - 垂直排列 */
+        .status-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        .status-card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 12px;
+            padding: 15px 20px;
+            display: flex;
+            align-items: center;
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .status-card:hover {
+            transform: translateX(5px);
+            border-color: rgba(var(--primary-rgb), 0.5);
+        }
+        .status-card.clickable:hover {
+            box-shadow: 0 5px 20px rgba(var(--primary-rgb), 0.2);
+        }
+        .status-card .icon { font-size: 1.8em; margin-right: 15px; }
+        .status-card .info { flex: 1; }
+        .status-card .label { font-size: 0.75em; color: var(--text-muted); margin-bottom: 2px; }
+        .status-card .value { font-size: 1em; font-weight: bold; }
+        .status-card.connected { 
+            border-color: var(--secondary); 
+            background: rgba(var(--secondary-rgb), 0.15);
+        }
+        .status-card.connected .value { color: var(--secondary); }
+        .status-card.disconnected { 
+            border-color: var(--danger); 
+            background: rgba(var(--danger-rgb), 0.15);
+        }
+        .status-card.disconnected .value { color: var(--danger); }
+        
+        /* Vision 卡片額外的人數顯示 */
+        .people-box {
+            text-align: center;
+            padding: 8px 15px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 8px;
+            margin-left: 10px;
+            min-width: 60px;
+        }
+        .people-box .label { font-size: 0.65em; color: var(--text-muted); }
+        .people-box .number {
+            font-size: 1.6em;
+            font-weight: bold;
+            font-family: monospace;
+            background: linear-gradient(90deg, var(--primary), var(--secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        /* 彈窗 */
+        .modal {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: rgba(0,0,0,0);
+            backdrop-filter: blur(0px);
+            z-index: 1000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.3s ease;
+        }
+        .modal.show {
+            opacity: 1;
+            visibility: visible;
+            background: rgba(0,0,0,0.7);
+            backdrop-filter: blur(5px);
+        }
+        .modal-content {
+            background: linear-gradient(135deg, var(--bg-dark) 0%, var(--bg-light) 100%);
+            border-radius: 15px;
+            padding: 25px;
+            width: 90%;
+            max-width: 400px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            transform: scale(0.8) translateY(-30px);
+            opacity: 0;
+            transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        .modal.show .modal-content {
+            transform: scale(1) translateY(0);
+            opacity: 1;
+        }
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        .modal-header h2 { font-size: 1.2em; color: var(--primary); }
+        .modal-close {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-size: 1.5em;
+            cursor: pointer;
+            width: auto;
+            padding: 0;
+        }
+        .modal-close:hover { color: var(--text); transform: none; box-shadow: none; }
+        
+        /* 表單 */
+        .form-group { margin-bottom: 15px; }
+        .form-row { display: flex; gap: 10px; }
+        .form-row .form-group { flex: 1; }
+        .form-row .form-group.port { flex: 0 0 100px; }
+        label { display: block; margin-bottom: 5px; color: var(--text-label); font-size: 0.9em; }
+        input[type="text"], input[type="password"], input[type="number"] {
+            width: 100%;
+            padding: 12px 15px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            background: rgba(0, 0, 0, 0.3);
+            color: var(--text);
+            font-size: 1em;
+        }
+        input:focus { outline: none; border-color: var(--primary); }
+        button {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(90deg, var(--primary), var(--secondary));
+            border: none;
+            border-radius: 8px;
+            color: var(--bg-dark);
+            font-size: 1em;
+            font-weight: bold;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(var(--primary-rgb), 0.3);
+        }
+        
+        /* 底部固定區塊 */
+        .bottom-fixed {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: linear-gradient(to top, rgba(26, 26, 46, 0.98) 0%, rgba(26, 26, 46, 0.9) 80%, transparent 100%);
+            padding: 15px 20px 20px;
+        }
+        .bottom-fixed .container {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        
+        /* 重啟按鈕 */
+        .reboot-btn {
+            background: linear-gradient(90deg, var(--danger), var(--danger-dark));
+        }
+        .reboot-btn:hover { box-shadow: 0 5px 20px rgba(var(--danger-rgb), 0.3); }
+        
+        /* 底部資訊 */
+        .footer-info {
+            margin-top: 12px;
+            text-align: center;
+            font-size: 0.75em;
+            color: #666;
+        }
+        .footer-info .line {
+            margin: 2px 0;
+        }
+        .footer-info .value { color: var(--text-muted); }
+        
+        /* 給底部留空間 */
+        .spacer { height: 120px; }
+        
+        /* 訊息 */
+        .msg {
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+        .msg.success { background: rgba(var(--secondary-rgb), 0.2); color: var(--secondary); }
+        .msg.error { background: rgba(var(--danger-rgb), 0.2); color: var(--danger); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🤖 NOMI Agent</h1>
+        
+        <div id="message"></div>
+        
+        <!-- 狀態卡片 (每行一個) -->
+        <div class="status-grid">
+            <div id="wifi-card" class="status-card clickable disconnected" onclick="openModal('wifi-modal')">
+                <div class="icon">📶</div>
+                <div class="info">
+                    <div class="label">WiFi</div>
+                    <div class="value" id="wifi-value">載入中...</div>
+                </div>
+            </div>
+            <div id="tcp-card" class="status-card clickable disconnected" onclick="openModal('tcp-modal')">
+                <div class="icon">🎯</div>
+                <div class="info">
+                    <div class="label">TCP 轉發</div>
+                    <div class="value" id="tcp-value">載入中...</div>
+                </div>
+            </div>
+            <div id="vision-card" class="status-card disconnected">
+                <div class="icon">👁️</div>
+                <div class="info">
+                    <div class="label">Vision AI</div>
+                    <div class="value" id="vision-value">Frame #-</div>
+                </div>
+                <div class="people-box">
+                    <div class="label">人數</div>
+                    <div class="number" id="people-count">-</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 底部留空 -->
+        <div class="spacer"></div>
+    </div>
+    
+    <!-- 固定底部區塊 -->
+    <div class="bottom-fixed">
+        <div class="container">
+            <button class="reboot-btn" onclick="rebootDevice()">🔄 重新啟動裝置</button>
+            <div class="footer-info">
+                <div class="line">IP: <span class="value" id="ip-address">-</span></div>
+                <div class="line">mDNS: <span class="value" id="mdns-name">nomi-setup.local</span></div>
+                <div class="line">Start: <span class="value" id="start-time">-</span> (<span id="uptime">-</span>)</div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- WiFi 設定彈窗 -->
+    <div id="wifi-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>📶 WiFi 設定</h2>
+                <button class="modal-close" onclick="closeModal('wifi-modal')">✕</button>
+            </div>
+            <form id="wifi-form">
+                <div class="form-group">
+                    <label>WiFi SSID</label>
+                    <input type="text" id="ssid" name="ssid" placeholder="輸入 WiFi 名稱">
+                </div>
+                <div class="form-group">
+                    <label>WiFi 密碼</label>
+                    <input type="password" id="password" name="password" placeholder="輸入 WiFi 密碼">
+                </div>
+                <button type="submit">💾 儲存 WiFi 設定</button>
+            </form>
+        </div>
+    </div>
+    
+    <!-- TCP 設定彈窗 -->
+    <div id="tcp-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>🎯 轉發目標設定</h2>
+                <button class="modal-close" onclick="closeModal('tcp-modal')">✕</button>
+            </div>
+            <form id="target-form">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>目標 IP 位址</label>
+                        <input type="text" id="target-ip" name="ip" placeholder="192.168.1.100">
+                    </div>
+                    <div class="form-group port">
+                        <label>Port</label>
+                        <input type="number" id="target-port" name="port" placeholder="8000" min="1" max="65535">
+                    </div>
+                </div>
+                <button type="submit">💾 儲存轉發設定</button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        let formInitialized = false;
+        
+        function openModal(id) {
+            document.getElementById(id).classList.add('show');
+        }
+        function closeModal(id) {
+            document.getElementById(id).classList.remove('show');
+        }
+        
+        // 點擊彈窗外部關閉
+        document.querySelectorAll('.modal').forEach(modal => {
+            modal.addEventListener('click', function(e) {
+                if (e.target === this) closeModal(this.id);
+            });
+        });
+        
+        async function loadStatus() {
+            try {
+                const response = await fetch('/api/status');
+                const data = await response.json();
+                
+                // WiFi 狀態
+                const wifiCard = document.getElementById('wifi-card');
+                const wifiValue = document.getElementById('wifi-value');
+                if (data.wifi_connected) {
+                    wifiCard.className = 'status-card clickable connected';
+                    wifiValue.textContent = data.ssid || '已連線';
+                } else {
+                    wifiCard.className = 'status-card clickable disconnected';
+                    wifiValue.textContent = '未連線';
+                }
+                
+                // TCP 狀態
+                const tcpCard = document.getElementById('tcp-card');
+                const tcpValue = document.getElementById('tcp-value');
+                if (data.tcp_connected) {
+                    tcpCard.className = 'status-card clickable connected';
+                    tcpValue.textContent = data.target_ip + ':' + data.target_port;
+                } else {
+                    tcpCard.className = 'status-card clickable disconnected';
+                    tcpValue.textContent = data.target_ip + ':' + data.target_port;
+                }
+                
+                // Vision 狀態
+                const visionCard = document.getElementById('vision-card');
+                const visionValue = document.getElementById('vision-value');
+                if (data.vision_connected) {
+                    visionCard.className = 'status-card connected';
+                    visionValue.textContent = 'Frame #' + (data.frame_count || '-');
+                } else {
+                    visionCard.className = 'status-card disconnected';
+                    visionValue.textContent = '未偵測';
+                }
+                
+                // 人數 (從 status API 取得)
+                document.getElementById('people-count').textContent = 
+                    data.people_count !== undefined ? data.people_count : '-';
+                
+                // IP Address
+                document.getElementById('ip-address').textContent = data.ip_address || '-';
+                
+                // Uptime 顯示
+                if (data.uptime_sec !== undefined) {
+                    const uptimeSec = data.uptime_sec;
+                    const days = Math.floor(uptimeSec / 86400);
+                    const hours = Math.floor((uptimeSec % 86400) / 3600);
+                    const mins = Math.floor((uptimeSec % 3600) / 60);
+                    const secs = uptimeSec % 60;
+                    const pad = n => String(n).padStart(2, '0');
+                    const uptimeStr = days > 0 
+                        ? `${days}d ${pad(hours)}:${pad(mins)}:${pad(secs)}`
+                        : `${pad(hours)}:${pad(mins)}:${pad(secs)}`;
+                    document.getElementById('uptime').textContent = uptimeStr;
+                    
+                    // 計算啟動時間
+                    const startTime = new Date(Date.now() - uptimeSec * 1000);
+                    const startStr = `${startTime.getFullYear()}/${startTime.getMonth()+1}/${startTime.getDate()} ${pad(startTime.getHours())}:${pad(startTime.getMinutes())}`;
+                    document.getElementById('start-time').textContent = startStr;
+                }
+                
+                // 初始化表單
+                if (!formInitialized) {
+                    document.getElementById('ssid').value = data.ssid || '';
+                    document.getElementById('target-ip').value = data.target_ip || '';
+                    document.getElementById('target-port').value = data.target_port || 8000;
+                    formInitialized = true;
+                }
+                
+            } catch (error) {
+                console.error('載入狀態失敗:', error);
+            }
+        }
+        
+        function showMessage(text, type) {
+            const msgEl = document.getElementById('message');
+            msgEl.innerHTML = '<div class="msg ' + type + '">' + text + '</div>';
+            setTimeout(function() { msgEl.innerHTML = ''; }, 3000);
+        }
+        
+        // WiFi 表單
+        document.getElementById('wifi-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            try {
+                const response = await fetch('/api/wifi', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: new URLSearchParams(formData)
+                });
+                const result = await response.json();
+                if (result.success) {
+                    showMessage('WiFi 設定已儲存，請重新啟動裝置', 'success');
+                    closeModal('wifi-modal');
+                } else {
+                    showMessage('儲存失敗: ' + result.message, 'error');
+                }
+            } catch (error) {
+                showMessage('請求失敗', 'error');
+            }
+        });
+        
+        // TCP 表單
+        document.getElementById('target-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            try {
+                const response = await fetch('/api/target', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: new URLSearchParams(formData)
+                });
+                const result = await response.json();
+                if (result.success) {
+                    showMessage('轉發設定已儲存', 'success');
+                    closeModal('tcp-modal');
+                    setTimeout(loadStatus, 1000);
+                } else {
+                    showMessage('儲存失敗', 'error');
+                }
+            } catch (error) {
+                showMessage('請求失敗', 'error');
+            }
+        });
+        
+        async function rebootDevice() {
+            if (!confirm('確定要重新啟動裝置嗎？')) return;
+            try {
+                showMessage('正在重新啟動...', 'success');
+                await fetch('/api/reboot', { method: 'POST' });
+            } catch (error) {}
+            setTimeout(function() { location.reload(); }, 5000);
+        }
+        
+        // 初始載入和定期更新
+        loadStatus();
+        setInterval(loadStatus, 500);
+    </script>
+</body>
+</html>
