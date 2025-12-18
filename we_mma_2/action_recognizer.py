@@ -172,7 +172,8 @@ class ActionRecognizer:
         skeleton_sequence: np.ndarray,
         person_id: int = 0,
         motion_magnitude: float = 0.0,
-        visibility_info: Dict[str, Any] = None
+        visibility_info: Dict[str, Any] = None,
+        bbox: Tuple[int, int, int, int] = None
     ) -> Optional[ActionResult]:
         """
         識別骨架序列的動作
@@ -182,6 +183,7 @@ class ActionRecognizer:
             person_id: 人物 ID
             motion_magnitude: 動作幅度（像素/幀）
             visibility_info: 骨架可見性資訊
+            bbox: 邊界框 (x, y, w, h)
             
         Returns:
             動作識別結果
@@ -242,7 +244,8 @@ class ActionRecognizer:
                         # 2. 判斷動作強度類型
                         if motion_magnitude < config.motion.threshold_low:
                             motion_type = "靜止"
-                            valid_actions = ["坐著", "站立", "蹲下/低姿態", "靜止/等待"]
+                            # 減少「靜止/等待」的權重，優先判定為具體姿態
+                            valid_actions = ["坐著", "站立", "蹲下/低姿態"]
                         elif motion_magnitude > config.motion.threshold_high:
                             motion_type = "劇烈"
                             valid_actions = ["跳躍", "打架/衝突", "躺下/跌倒", "跑步", "走路"]
@@ -256,23 +259,42 @@ class ActionRecognizer:
                         final_action = simp_label
                         final_confidence = simp_score
                         
-                        # (A) 骨架可見性過濾（優先級最高）
+                        # 預先判斷坐姿可能性
+                        is_sitting_likely = False
+                        aspect_ratio = 0.0
                         if visibility_info:
-                            # 如果下半身不可見，極大機率是坐著
-                            if visibility_info.get('is_sitting_likely', False):
-                                if final_action in ["站立", "走路", "跳躍", "跑步"]:
+                            is_sitting_likely = visibility_info.get('is_sitting_likely', False)
+                            if bbox is not None:
+                                x, y, w, h = bbox
+                                aspect_ratio = h / w if w > 0 else 0
+                                # 強化比例判定：
+                                # 1. 如果比例明顯是長方形（站立通常 > 1.3），則極大機率是站立
+                                if aspect_ratio > 1.3:
+                                    is_sitting_likely = False
+                                # 2. 如果比例接近正方形或更扁，且下半身可見度不高，極大機率是坐著
+                                elif aspect_ratio < 1.1:
+                                    is_sitting_likely = True
+                        
+                        # (A) 骨架可見性與比例過濾（優先級最高）
+                        if visibility_info:
+                            # 如果判定為坐著，強制修正站立類動作
+                            if is_sitting_likely:
+                                if final_action in ["站立", "走路", "跳躍", "跑步", "靜止/等待", "運動/伸展"]:
                                     final_action = "坐著"
                                     final_confidence = max(0.8, final_confidence)
+                            # 反之，如果判定為站立，但模型誤判為坐著或運動（可能是因為手部動作誤導）
+                            elif not is_sitting_likely:
+                                if final_action in ["坐著", "運動/伸展"] and motion_type != "劇烈":
+                                    final_action = "站立"
+                                    final_confidence = 0.7
                             
                             # 針對「刷牙/摸頭」等手部動作的邏輯修正：
-                            # 如果手部關鍵點置信度極低，但模型卻預測了需要手的動作（在 mapping 中被歸類為坐或站）
-                            # 我們檢查原始 Top-1 標籤是否屬於手部敏感動作
                             hand_sensitive_actions = ["刷牙", "梳頭", "吃東西", "喝水", "觸摸頭", "觸摸頸"]
                             upper_ratio = visibility_info.get('upper_ratio', 0.0)
                             if result.action_label in hand_sensitive_actions and upper_ratio < 0.4:
                                 # 手部不可見卻判定為手部動作，降級為基礎姿態
                                 if motion_type == "靜止":
-                                    final_action = "坐著"
+                                    final_action = "坐著" if is_sitting_likely else "站立"
                                 else:
                                     final_action = "站立"
                         
@@ -289,10 +311,15 @@ class ActionRecognizer:
                                     found_better = True
                                     break
                             
-                            # 如果都沒找到，且是靜止狀態，強制歸類
+                            # 如果都沒找到，且是靜止狀態，強制歸類為基礎姿態
                             if not found_better and motion_type == "靜止":
-                                final_action = "坐著" if visibility_info and visibility_info.get('is_sitting_likely', False) else "站立"
+                                final_action = "坐著" if is_sitting_likely else "站立"
                                 final_confidence = 0.5
+                        
+                        # (C) 最終兜底：如果還是「靜止/等待」，但在靜止狀態下，強制轉為姿態
+                        if final_action == "靜止/等待" and motion_type == "靜止":
+                            final_action = "坐著" if is_sitting_likely else "站立"
+                            final_confidence = 0.6
                         
                         # 更新最終結果
                         result.simplified_label = final_action
@@ -308,7 +335,7 @@ class ActionRecognizer:
                         
                         # 智慧描述合成：如果是坐著進行特定動作
                         description = self._get_description(final_action)
-                        if visibility_info and visibility_info.get('is_sitting_likely', False) and final_action != "坐著":
+                        if is_sitting_likely and final_action != "坐著":
                             description = f"坐著{description.replace('這個人正在', '')}"
                         
                         # 如果動作持續很久，增加描述強度
@@ -525,7 +552,13 @@ class ActionRecognizer:
             motion = info.get('motion', 0.0)
             visibility = info.get('visibility', None)
             
-            result = self.recognize(sequence, person_id, motion, visibility)
+            result = self.recognize(
+                sequence, 
+                person_id, 
+                motion, 
+                visibility, 
+                info.get('bbox')
+            )
             if result:
                 results[person_id] = result
         return results
@@ -542,7 +575,7 @@ class ActionRecognizer:
             多行格式化描述文字
         """
         if not self.last_results:
-            return "等待骨架資料...\n(需要累積足夠的幀數進行動作分析)"
+            return "未偵測到人物或正在累積資料..."
         
         lines = []
         lines.append("=" * 40)

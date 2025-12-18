@@ -152,24 +152,40 @@ class WE_MMA_2_App:
             # 獲取所有人物的骨架序列
             sequences = self.skeleton_processor.get_all_skeleton_sequences()
             
+            # 準備包含動作強度和可見性的資訊
+            sequences_info = {}
+            
             if sequences:
-                # 準備包含動作強度和可見性的資訊
-                sequences_info = {}
                 for person_id, sequence in sequences.items():
                     motion = self.skeleton_processor.get_motion_magnitude(person_id)
                     visibility = self.skeleton_processor.analyze_visibility(person_id)
+                    
+                    # 獲取最新的邊界框資訊
+                    bbox = None
+                    if self.skeleton_processor.interpolated_buffer:
+                        latest_frame = self.skeleton_processor.interpolated_buffer[-1]
+                        for p in latest_frame.persons:
+                            if p.person_id == person_id:
+                                bbox = p.box
+                                break
+                    
                     sequences_info[person_id] = {
                         'sequence': sequence,
                         'motion': motion,
-                        'visibility': visibility
+                        'visibility': visibility,
+                        'bbox': bbox
                     }
                 
                 self.debug_log(f"Submitting {len(sequences)} sequence(s) for recognition")
-                # 提交給異步識別器
-                self.action_recognizer.submit(sequences_info)
             else:
-                buffer_status = self.skeleton_processor.get_buffer_status()
-                self.debug_log(f"No sequences available. Buffer: {buffer_status}")
+                # 如果沒有序列，提交空字典以清理舊資料
+                self.debug_log("No sequences available, clearing results")
+                
+            # 始終提交（即使是空字典），這樣識別器才能清理消失的人物
+            self.action_recognizer.submit(sequences_info)
+                
+        except Exception as e:
+            self.debug_log(f"Action recognition error: {e}")
                 
         except Exception as e:
             self.debug_log(f"Action recognition error: {e}")

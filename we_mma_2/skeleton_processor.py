@@ -352,11 +352,12 @@ class SkeletonProcessor:
         upper_ratio = upper_visible / len(UPPER_BODY_INDICES)
         lower_ratio = lower_visible / len(LOWER_BODY_INDICES)
         
-        # 判斷是否可能坐著：上半身可見但下半身幾乎不可見
-        is_sitting_likely = (upper_ratio >= 0.5 and lower_ratio < 0.3)
+        # 判斷是否可能坐著：上半身可見但下半身可見度低
+        # 放寬判定標準：只要下半身有一半以上不可見，且上半身清晰，就極大機率是坐著（被桌子遮擋）
+        is_sitting_likely = (upper_ratio >= 0.5 and lower_ratio < 0.5)
         
         # 判斷是否全身可見
-        is_full_body = (upper_ratio >= 0.7 and lower_ratio >= 0.5)
+        is_full_body = (upper_ratio >= 0.7 and lower_ratio >= 0.7)
         
         # 計算總可見點數和平均置信度
         visible_mask = keypoints[:, 2] >= confidence_threshold
