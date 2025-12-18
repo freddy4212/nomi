@@ -37,7 +37,7 @@ class FrameData:
 
 
 class NetworkReceiver:
-    """網路資料接收器（支援 Server 和 Client 模式）"""
+    """網路資料接收器（支援 Server 和 Client 模式，含自動重連）"""
     
     def __init__(self, on_frame_received: Optional[Callable[[FrameData], None]] = None):
         """
@@ -76,6 +76,14 @@ class NetworkReceiver:
         
         # 客戶端資訊（Server 模式）
         self.client_addr: Optional[tuple] = None
+        
+        # 重連控制
+        self.reconnect_count: int = 0
+        self.last_connection_time: float = 0
+        self.last_data_time: float = 0
+        
+        # 連線狀態變更時間（用於即時更新 GUI）
+        self._connection_state_changed: bool = False
         
     def debug_log(self, msg: str):
         """除錯日誌"""
@@ -167,11 +175,50 @@ class NetworkReceiver:
         self.is_connected = False
         self.client_addr = None
         
-        if was_connected and self.on_connection_changed:
-            self.on_connection_changed(False)
+        if was_connected:
+            self.reconnect_count += 1
+            self._connection_state_changed = True
+            self.debug_log(f"Disconnected. Reconnect attempt #{self.reconnect_count}")
+            if self.on_connection_changed:
+                try:
+                    self.on_connection_changed(False)
+                except:
+                    pass
+    
+    def check_connection_state(self) -> bool:
+        """
+        檢查連線狀態是否有變化（供 GUI 輪詢使用）
+        
+        Returns:
+            如果狀態有變化返回 True
+        """
+        changed = self._connection_state_changed
+        self._connection_state_changed = False
+        return changed
+    
+    def get_connection_status(self) -> dict:
+        """
+        獲取詳細的連線狀態（供 GUI 顯示）
+        
+        Returns:
+            狀態字典
+        """
+        now = time.time()
+        data_age = now - self.last_data_time if self.last_data_time > 0 else -1
+        
+        return {
+            "connected": self.is_connected,
+            "mode": self.mode,
+            "host": self.host,
+            "port": self.port,
+            "client_addr": self.client_addr,
+            "reconnect_count": self.reconnect_count,
+            "data_age": data_age,  # 距離上次收到資料的秒數
+            "fps": self.current_fps
+        }
     
     def _server_loop(self):
-        """Server 模式：監聽並接受連接"""
+        """Server 模式：監聽並接受連接（含自動重連處理）"""
         self.debug_log("Server loop started")
         
         try:
@@ -193,14 +240,21 @@ class NetworkReceiver:
                 try:
                     client_sock, addr = self.server_socket.accept()
                     client_sock.settimeout(0.1)
+                    # 設定 TCP_NODELAY 減少延遲
+                    client_sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                     self.client_socket = client_sock
                     self.client_addr = addr
                     self.is_connected = True
+                    self._connection_state_changed = True
+                    self.last_connection_time = time.time()
                     byte_buffer = b""
                     self.debug_log(f"Client connected from {addr}")
                     
                     if self.on_connection_changed:
-                        self.on_connection_changed(True)
+                        try:
+                            self.on_connection_changed(True)
+                        except:
+                            pass
                         
                 except socket.timeout:
                     continue
@@ -286,18 +340,16 @@ class NetworkReceiver:
                     frame_data = self._parse_line(line)
                     
                     if frame_data and self.on_frame_received:
-                        # 更新 FPS 統計
                         self._update_fps()
-                        # 調用回調函數
                         self.on_frame_received(frame_data)
                         
-                except UnicodeDecodeError:
-                    pass
+                except UnicodeDecodeError as e:
+                    print(f"[RX] Decode error: {e}")
                     
             except queue.Empty:
                 continue
             except Exception as e:
-                self.debug_log(f"Process error: {e}")
+                print(f"[RX] Error: {e}")
                 
         self.debug_log("Process thread ended")
     
@@ -347,18 +399,20 @@ class NetworkReceiver:
                 raw_data=inner_data
             )
             
-            if frame_data.keypoints:
-                self.debug_log(f"Frame {frame_data.frame_no}: {len(frame_data.keypoints)} people detected")
+            # 永遠輸出幀編號到終端
+            people_count = len(frame_data.keypoints) if frame_data.keypoints else 0
+            print(f"[RX] Frame #{frame_data.frame_no} - {people_count} people")
             
             return frame_data
             
         except json.JSONDecodeError as e:
-            self.debug_log(f"JSON parse error: {e}")
+            print(f"[RX] JSON error at {e.pos}: {e.msg}")
             return None
     
     def _update_fps(self):
         """更新 FPS 統計"""
         self.frame_count += 1
+        self.last_data_time = time.time()  # 記錄最後收到資料的時間
         elapsed = time.time() - self.fps_start_time
         
         if elapsed >= 1.0:

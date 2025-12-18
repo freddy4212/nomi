@@ -617,15 +617,34 @@ class ReceiverGUIInterface:
                 self.txt_vector.delete("1.0", tk.END)
                 self.txt_vector.insert(tk.END, str(vector))
     
-    def update_connection_status(self, connected: bool):
-        """更新連接狀態"""
+    def update_connection_status(self, connected: bool, status_info: dict = None):
+        """更新連接狀態（含詳細資訊）"""
         self.is_connected = connected
+        
         if connected:
             self.status_label.config(text="● 已連接", foreground="green")
-            self.lbl_conn_status.config(text="Status: 已連接", foreground="green")
+            if status_info:
+                client = status_info.get("client_addr")
+                if client:
+                    self.lbl_conn_status.config(
+                        text=f"Status: ✓ {client[0]}:{client[1]}", 
+                        foreground="green"
+                    )
+                else:
+                    self.lbl_conn_status.config(text="Status: ✓ 已連接", foreground="green")
+            else:
+                self.lbl_conn_status.config(text="Status: ✓ 已連接", foreground="green")
         else:
-            self.status_label.config(text="● 連接中...", foreground="orange")
-            self.lbl_conn_status.config(text="Status: 連接中...", foreground="orange")
+            reconnect_count = status_info.get("reconnect_count", 0) if status_info else 0
+            if reconnect_count > 0:
+                self.status_label.config(text=f"● 重連中 ({reconnect_count})", foreground="orange")
+                self.lbl_conn_status.config(
+                    text=f"Status: 等待連線... (重連 {reconnect_count} 次)", 
+                    foreground="orange"
+                )
+            else:
+                self.status_label.config(text="● 等待連線", foreground="orange")
+                self.lbl_conn_status.config(text="Status: 等待連線...", foreground="orange")
     
     # ===== 公開方法 =====
     
@@ -783,7 +802,12 @@ class ReceiverGUIInterface:
     def update_interpolation_status(self, status: Dict[str, Any]):
         """更新補幀狀態顯示"""
         self.lbl_raw_frames.config(text=f"Raw Frames: {status.get('raw_frames', 0)}")
-        self.lbl_interp_frames.config(text=f"Interp Frames: {status.get('interpolated_frames', 0)}")
+        
+        # 顯示播放緩衝區狀態（更有意義）
+        player_status = self.skeleton_player.get_buffer_status()
+        remaining = player_status.get("remaining", 0)
+        buffer_size = player_status.get("buffer_size", 0)
+        self.lbl_interp_frames.config(text=f"Buffer: {remaining}/{buffer_size}")
         
         if status.get('sequence_ready', False):
             self.lbl_sequence_ready.config(text="Sequence: ✓ Ready", foreground="green")
@@ -791,9 +815,10 @@ class ReceiverGUIInterface:
             self.lbl_sequence_ready.config(text="Sequence: Buffering...", foreground="orange")
     
     def update_interpolated_frames(self, skeleton_frames: list):
-        """更新補幀骨架列表"""
+        """更新補幀骨架列表（追加模式）"""
         if skeleton_frames:
-            self.skeleton_player.set_buffer(list(skeleton_frames))
+            # 使用追加模式，而非覆蓋
+            self.skeleton_player.set_buffer(skeleton_frames)
             if self.interp_timer_id is None and self.cached_mode == "interpolated":
                 self._start_interpolated_playback()
     
@@ -801,7 +826,7 @@ class ReceiverGUIInterface:
         """開始播放補幀動畫"""
         if self.interp_timer_id is not None:
             return
-        self.skeleton_player.reset()
+        # 不重置播放器，繼續從當前位置播放
         self._play_next_interpolated_frame()
     
     def _stop_interpolated_playback(self):
@@ -819,7 +844,8 @@ class ReceiverGUIInterface:
         frame = self.skeleton_player.get_next_frame()
         
         if not frame:
-            self.interp_timer_id = self.root.after(67, self._play_next_interpolated_frame)
+            # 沒有幀可播放，等待新幀
+            self.interp_timer_id = self.root.after(33, self._play_next_interpolated_frame)
             return
         
         try:
@@ -844,7 +870,22 @@ class ReceiverGUIInterface:
             if config.debug:
                 print(f"[ReceiverGUI] Interpolated playback error: {e}")
         
-        self.interp_timer_id = self.root.after(33, self._play_next_interpolated_frame)
+        # 根據緩衝區狀態動態調整播放間隔
+        buffer_status = self.skeleton_player.get_buffer_status()
+        remaining = buffer_status.get("remaining", 0)
+        
+        if remaining <= 2:
+            # 緩衝區快空了，減慢播放速度等待新幀
+            interval = 50  # ~20 FPS
+        elif remaining <= 5:
+            interval = 40  # ~25 FPS
+        elif remaining > 30:
+            # 緩衝區太滿，加快消耗
+            interval = 25  # ~40 FPS
+        else:
+            interval = 33  # ~30 FPS
+        
+        self.interp_timer_id = self.root.after(interval, self._play_next_interpolated_frame)
     
     def _on_mode_change(self, *args):
         """顯示模式變更"""

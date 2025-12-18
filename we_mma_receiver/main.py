@@ -96,14 +96,23 @@ class WE_MMA_Receiver_App:
     
     def _on_connection_changed(self, connected: bool):
         """連接狀態變更回調（在背景執行緒中調用）"""
-        self.root.after(0, self.gui.update_connection_status, connected)
+        status_info = self.network_receiver.get_connection_status()
+        self.root.after(0, lambda: self.gui.update_connection_status(connected, status_info))
         
         if connected:
             self.root.after(0, self.gui.update_action_text, 
                           "已連接到發射端！\n正在接收骨架資料...")
+            # 連接時清除之前的錯誤計數
+            self.root.after(0, self.gui.clear_errors)
         else:
+            reconnect_count = status_info.get("reconnect_count", 0)
             self.root.after(0, self.gui.update_action_text,
-                          "連接已斷開，正在嘗試重新連接...")
+                          f"連接已斷開，正在嘗試重新連接... (第 {reconnect_count} 次)")
+    
+    def _on_error(self, error_msg: str):
+        """錯誤回調（在背景執行緒中調用）"""
+        # 排程到主執行緒更新 GUI
+        self.root.after(0, self.gui.update_error, error_msg)
     
     def _on_frame_received(self, frame_data: FrameData):
         """
@@ -159,7 +168,7 @@ class WE_MMA_Receiver_App:
         try:
             # 獲取所有人的識別結果
             all_results = {}
-            person_ids = list(self.skeleton_processor.raw_buffer.keys())
+            person_ids = list(self.skeleton_processor.person_tracker.keys())
             
             if not person_ids:
                 self.gui.update_action_result(
@@ -265,11 +274,30 @@ class WE_MMA_Receiver_App:
         except Exception as e:
             self.debug_log(f"MMAction2 model not loaded (using fallback): {e}")
         
+        # 啟動定期連線狀態更新
+        self._schedule_connection_check()
+        
         # 啟動主迴圈
         self.gui.run()
         
         # 清理
         self._cleanup()
+    
+    def _schedule_connection_check(self):
+        """定期檢查並更新連線狀態"""
+        try:
+            # 檢查連線狀態是否有變化
+            if self.network_receiver.check_connection_state():
+                status_info = self.network_receiver.get_connection_status()
+                self.gui.update_connection_status(
+                    self.network_receiver.is_connected, 
+                    status_info
+                )
+        except Exception as e:
+            pass
+        
+        # 每 500ms 檢查一次
+        self.root.after(500, self._schedule_connection_check)
     
     def _cleanup(self):
         """清理資源"""
