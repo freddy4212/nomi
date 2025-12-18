@@ -6,8 +6,9 @@
 使用方式：python3 convert_html.py
 """
 
-import os
 import gzip
+import os
+
 
 def convert_html_to_header():
     script_dir = os.path.dirname(os.path.abspath(__file__))
