@@ -586,7 +586,8 @@ class SkeletonPreprocessor:
             prev_time = self.last_timestamp[person_id]
             
             time_diff = timestamp - prev_time
-            if time_diff > 0:
+            # 如果時間差太大（超過 1 秒），視為新出現的人，不進行插值
+            if 0 < time_diff < 1.0:
                 # 計算需要的插值幀數
                 target_interval = 1.0 / self.target_fps
                 num_frames = int(time_diff / target_interval)
@@ -596,6 +597,9 @@ class SkeletonPreprocessor:
                 interpolated_frames = self.interpolator.interpolate_pair(
                     prev_kpts, smoothed, num_frames, method='hermite'
                 )
+            elif time_diff >= 1.0:
+                # 重置該人物的濾波器狀態，避免從過時的位置開始平滑
+                self.one_euro.reset(person_id)
         
         # 更新狀態
         self.last_processed[person_id] = smoothed.copy()

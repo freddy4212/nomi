@@ -34,10 +34,9 @@ class GUIConfig:
 class ActionRecognizerConfig:
     """MMAction2 動作識別配置"""
     # 模型配置檔案路徑（使用絕對路徑）
-    # 推薦使用 NTU RGB+D 60 資料集訓練的模型
-    config_file: str = "/Users/freddy/Documents/251006_WiseEye2/sscma-example-we2/we_mma_2/mmaction2/configs/skeleton/posec3d/slowonly_r50_8xb16-u48-240e_ntu60-xsub-keypoint.py"
+    config_file: str = "/Users/freddy/Documents/251006_WiseEye2/sscma-example-we2/we_mma_2/mmaction2/configs/skeleton/stgcnpp/stgcnpp_8xb16-joint-u100-80e_ntu60-xsub-keypoint-2d.py"
     # 模型權重檔案路徑（使用絕對路徑）
-    checkpoint_file: str = "/Users/freddy/Documents/251006_WiseEye2/sscma-example-we2/we_mma_2/mmaction2/checkpoints/slowonly_r50_8xb16-u48-240e_ntu60-xsub-keypoint_20220815-38db104b.pth"
+    checkpoint_file: str = "/Users/freddy/Documents/251006_WiseEye2/sscma-example-we2/we_mma_2/mmaction2/checkpoints/stgcnpp_ntu60_joint.pth"
     # 設備：'cuda:0' 或 'cpu' 或 'mps'（Apple Silicon）
     device: str = "cpu"
     
@@ -105,51 +104,62 @@ class SkeletonConfig:
 @dataclass
 class SimplifiedActionConfig:
     """簡化動作識別配置"""
-    # 簡化動作標籤（7類基本動作）
+    # 簡化動作標籤（基礎動作）
     labels: List[str] = field(default_factory=lambda: [
-        "坐著/靜止",      # 0: 靜態姿勢
-        "站立/動作",      # 1: 站著做事
-        "走動",          # 2: 行走相關
-        "跳躍",          # 3: 跳躍動作
-        "蹲下/彎腰",     # 4: 彎腰撿東西等
-        "打鬥/推擠",     # 5: 衝突動作
-        "跌倒/異常",     # 6: 危險狀況
+        "坐著",          # 0
+        "站立",          # 1
+        "走路",          # 2
+        "跑步",          # 3
+        "跳躍",          # 4
+        "運動/伸展",      # 5
+        "打架/衝突",      # 6
+        "蹲下/低姿態",    # 7
+        "躺下/跌倒",      # 8
+        "靜止/等待"       # 9
     ])
     
     # NTU60 → 簡化類別映射
-    # 索引對應 config.action.action_labels 的順序 (0-59)
     mapping: Dict[int, int] = field(default_factory=lambda: {
-        # === 坐著/靜止 (0) ===
-        # 喝水, 吃東西, 刷牙, 梳頭, 閱讀, 寫字, 打電話, 玩手機
-        0: 0, 1: 0, 2: 0, 3: 0, 16: 0, 17: 0, 22: 0, 23: 0,
-        # === 站立/動作 (1) ===
-        # 掉落物品, 撿起物品, 丟東西, 穿衣, 脫衣, 穿鞋, 脫鞋, 穿眼鏡, 脫眼鏡, 戴帽, 脫帽
-        4: 1, 5: 1, 6: 1, 7: 1, 8: 1, 9: 1, 10: 1, 11: 1, 12: 1, 13: 1, 14: 1,
-        # 拍手, 撕紙, 揮手, 踢腿, 摸口袋, 打字, 指向, 拍照, 看時間, 搓手, 點頭
-        15: 1, 18: 1, 19: 1, 20: 1, 21: 1, 24: 1, 25: 1, 26: 1, 27: 1, 28: 1, 29: 1,
-        # 搖頭, 扇風, 打拳, 伸展, 咳嗽, 哈欠, 頭痛, 胸痛, 背痛, 頸痛, 嘔吐, 吹鼻, 擦臉
-        30: 1, 31: 1, 32: 1, 33: 1, 34: 1, 35: 1, 37: 1, 38: 1, 39: 1, 40: 1, 41: 1, 42: 1, 43: 1,
-        # 摸頭, 摸胸, 摸背, 摸頸, 站起, 坐下, 揮手致意, 抱胸, 鞠躬, 握手, 擁抱, 推拉
-        44: 1, 45: 1, 46: 1, 47: 1, 48: 1, 49: 1, 54: 1, 55: 1, 56: 1, 57: 1, 58: 1, 59: 1,
-        # === 走動 (2) ===
-        50: 2, # 行走
-        # === 跳躍 (3) ===
-        51: 3, # 跳躍
-        # === 蹲下/彎腰 (4) ===
-        53: 4, # 蹲下
-        # === 打鬥/推擠 (5) ===
-        # (NTU60 中打鬥類較少，部分歸類在站立動作)
-        # === 跌倒/異常 (6) ===
-        36: 6, # 踉蹌
-        # 注意：NTU60 原始標籤中沒有明確的"跌倒"，通常用踉蹌代替
+        # === 坐著 (0) ===
+        7: 0,  # 坐下 (A008)
+        0: 0, 1: 0, 2: 0, 3: 0, 10: 0, 11: 0, 12: 0, 27: 0, 28: 0, 29: 0, 
+        40: 0, 43: 0, 44: 0, 45: 0, 46: 0, 47: 0, 48: 0,
+        
+        # === 站立 (1) ===
+        8: 1,  # 站起 (A009)
+        4: 1, 5: 1, 6: 1, 9: 1, 13: 1, 14: 1, 15: 1, 16: 1, 17: 1, 18: 1, 19: 1, 20: 1, 
+        24: 1, 30: 1, 31: 1, 34: 1, 35: 1, 36: 1, 39: 1, 53: 1, 54: 1, 55: 1, 56: 1, 57: 1,
+        
+        # === 走路 (2) ===
+        58: 2, 59: 2,
+        
+        # === 跑步 (3) ===
+        52: 3,
+        
+        # === 跳躍 (4) ===
+        25: 4, 26: 4,
+        
+        # === 運動/伸展 (5) ===
+        21: 5, 22: 5, # 揮手 (A023) 現在歸類為運動，不會被坐姿強制覆蓋
+        23: 5, 32: 5, 33: 5, 37: 5, 38: 5,
+        
+        # === 打架/衝突 (6) ===
+        49: 6, 50: 6, 51: 6, # 打拳、踢人、推擠 (A050-A052)
+        
+        # === 蹲下/低姿態 (7) ===
+        53: 7,
+        
+        # === 躺下/跌倒 (8) ===
+        41: 8, 42: 8, # 踉蹌、跌倒
     })
 
 
 @dataclass
 class MotionConfig:
     """動作強度配置"""
-    threshold_low: float = 2.0   # 低於此為靜止
-    threshold_high: float = 8.0  # 高於此為劇烈
+    # 這些數值現在是歸一化後的（相對於人體大小）
+    threshold_low: float = 5.0   # 低於此為靜止
+    threshold_high: float = 25.0  # 高於此為劇烈
 
 
 @dataclass

@@ -381,36 +381,43 @@ class SkeletonProcessor:
 
     def get_motion_magnitude(self, person_id: int) -> float:
         """
-        計算指定人物的動作幅度
+        計算指定人物的動作幅度（歸一化後的位移）
         
         Args:
             person_id: 人物 ID
             
         Returns:
-            動作幅度（像素/幀）
+            動作幅度（歸一化單位/幀）
         """
         if len(self.interpolated_buffer) < 5:
             return 0.0
             
         # 收集該人物最近的關鍵點序列
         recent_keypoints = []
-        # 取最近 20 幀
-        frames_to_check = list(self.interpolated_buffer)[-min(20, len(self.interpolated_buffer)):]
+        # 取最近 15 幀（約 1 秒）
+        frames_to_check = list(self.interpolated_buffer)[-min(15, len(self.interpolated_buffer)):]
         
+        target_person_latest = None
         for frame in frames_to_check:
             found = False
             for person in frame.persons:
                 if person.person_id == person_id:
                     recent_keypoints.append(person.get_keypoints(use_smoothed=True))
+                    target_person_latest = person
                     found = True
                     break
-            if not found and recent_keypoints:
-                # 如果中間有一幀沒抓到人，中斷或補上一幀？這裡選擇跳過
-                pass
         
-        if len(recent_keypoints) < 2:
+        if len(recent_keypoints) < 2 or target_person_latest is None:
             return 0.0
             
+        # 獲取邊界框大小用於歸一化（解決遠近問題）
+        _, _, w, h = target_person_latest.box
+        bbox_diag = np.sqrt(w**2 + h**2)
+        if bbox_diag < 10: bbox_diag = 100.0 # 防止除以零
+            
+        # 定義穩定點 (肩膀、臀部、中心)
+        STABLE_POINTS = [5, 6, 11, 12]
+        
         # 計算每幀之間的平均位移
         total_motion = 0.0
         count = 0
@@ -419,17 +426,31 @@ class SkeletonProcessor:
             prev_kp = recent_keypoints[i-1]
             curr_kp = recent_keypoints[i]
             
-            # 只計算可見的關鍵點
+            # 計算這一幀的位移
+            frame_motion = 0.0
+            frame_count = 0
+            
             for j in range(17):
                 if prev_kp[j, 2] > 0.3 and curr_kp[j, 2] > 0.3:
                     dist = np.linalg.norm(curr_kp[j, :2] - prev_kp[j, :2])
-                    total_motion += dist
-                    count += 1
+                    
+                    # 穩定點權重較高，末梢點權重較低（減少雜訊影響）
+                    weight = 2.0 if j in STABLE_POINTS else 0.5
+                    frame_motion += dist * weight
+                    frame_count += weight
+            
+            if frame_count > 0:
+                # 歸一化：位移相對於人體大小 (百分比)
+                normalized_motion = (frame_motion / frame_count) / bbox_diag * 1000
+                total_motion += normalized_motion
+                count += 1
         
         if count == 0:
             return 0.0
             
         return total_motion / count
+
+    def _init_tracking(self):
         self.next_person_id: int = 0
         
         # 最後處理的時間戳
@@ -475,6 +496,10 @@ class SkeletonProcessor:
             x, y, w, h, score, target = box_data[:6]
             box = (int(x), int(y), int(w), int(h))
             
+            # 使用 ReID 的 Person ID (target)
+            # 如果 target 為 -1 或無效，則回退到索引 idx
+            person_id = int(target) if target >= 0 else idx
+            
             # 解析關鍵點
             keypoints = self._parse_keypoints(person_data[1:])
             
@@ -487,14 +512,14 @@ class SkeletonProcessor:
                 
                 # 使用專業的預處理器（One Euro Filter + 解剖學約束）
                 smoothed_keypoints, interp_frames = self.preprocessor.process_frame(
-                    person_id=idx,
+                    person_id=person_id,
                     keypoints=keypoints,
                     timestamp=frame_data.timestamp,
                     bbox=box
                 )
                 
                 person = PersonSkeleton(
-                    person_id=idx,
+                    person_id=person_id,
                     box=box,
                     score=float(score),
                     keypoints=keypoints.copy(),  # 保存原始關鍵點
@@ -502,7 +527,7 @@ class SkeletonProcessor:
                     smoothed_keypoints=smoothed_keypoints  # 保存平滑後的關鍵點
                 )
                 persons.append(person)
-                interpolated_persons_list.append((idx, box, float(score), interp_frames))
+                interpolated_persons_list.append((person_id, box, float(score), interp_frames))
         
         if not persons:
             return SkeletonFrame(
@@ -759,17 +784,20 @@ class SkeletonProcessor:
         if len(self.interpolated_buffer) < config.interpolation.sequence_length:
             return {}
         
-        # 找出所有出現過的人物 ID
-        all_person_ids = set()
-        frames = list(self.interpolated_buffer)[-config.interpolation.sequence_length:]
+        # 只針對「當前畫面中」的人物進行識別
+        # 這樣當人離開畫面時，識別結果會立即消失
+        latest_frame = self.get_latest_interpolated_frame()
+        if not latest_frame or not latest_frame.persons:
+            return {}
+            
+        current_person_ids = [p.person_id for p in latest_frame.persons]
         
-        for frame in frames:
-            for person in frame.persons:
-                all_person_ids.add(person.person_id)
+        # 取最近的 sequence_length 幀
+        frames = list(self.interpolated_buffer)[-config.interpolation.sequence_length:]
         
         # 為每個人物建構序列
         sequences = {}
-        for person_id in all_person_ids:
+        for person_id in current_person_ids:
             sequence = np.zeros(
                 (config.interpolation.sequence_length, config.skeleton.num_keypoints, 3),
                 dtype=np.float32

@@ -31,13 +31,15 @@ from collections import deque
 class ActionResult:
     """動作識別結果"""
     person_id: int  # 人物 ID
-    action_label: str  # 動作標籤（如 "跳躍"）
-    action_description: str  # 動作描述（如 "這個人正在上下跳動"）
-    confidence: float  # 信心度 (0-1)
-    top_k_actions: List[Tuple[str, float]]  # Top-K 預測結果
-    simplified_label: str = ""  # 簡化後的動作標籤（7類）
-    motion_status: str = ""     # 動作強度狀態（靜止/移動/劇烈）
-    raw_scores: Optional[np.ndarray] = None  # 原始預測分數
+    action_label: str  # 動作標籤
+    action_description: str  # 動作描述
+    confidence: float  # 信心度
+    top_k_actions: List[Tuple[str, float]]  # Top-K
+    simplified_label: str = ""  # 簡化標籤
+    motion_status: str = ""     # 動作強度
+    duration: float = 0.0       # 該動作持續時間（秒）
+    is_stable: bool = False     # 動作是否已穩定
+    raw_scores: Optional[np.ndarray] = None
 
 
 class TemporalFilter:
@@ -96,49 +98,19 @@ class ActionRecognizer:
         self.device = config.action.device
         self.lock = threading.Lock()
         
-        # 動作描述模板
-        self.action_descriptions = {
-            "站立": "這個人正在站立不動",
-            "行走": "這個人正在行走移動",
-            "跑步": "這個人正在快速奔跑",
-            "跳躍": "這個人正在上下跳動",
-            "坐下": "這個人正在坐下",
-            "起立": "這個人正在從座位上起身",
-            "揮手": "這個人正在揮手打招呼",
-            "拍手": "這個人正在拍手",
-            "閱讀": "這個人正在閱讀東西",
-            "打電話": "這個人正在打電話",
-            "喝水": "這個人正在喝水",
-            "吃東西": "這個人正在吃東西",
-            "穿衣服": "這個人正在穿衣服",
-            "脫衣服": "這個人正在脫衣服",
-            "寫字": "這個人正在寫字",
-            "打字": "這個人正在打字",
-            "指向": "這個人正在用手指向某處",
-            "拍照": "這個人正在拍照",
-            "玩手機": "這個人正在使用手機",
-            "睡覺": "這個人正在睡覺休息",
-            # 英文標籤對應
-            "standing": "這個人正在站立不動",
-            "walking": "這個人正在行走移動",
-            "running": "這個人正在快速奔跑",
-            "jumping": "這個人正在上下跳動",
-            "sitting down": "這個人正在坐下",
-            "standing up": "這個人正在從座位上起身",
-            "waving hand": "這個人正在揮手打招呼",
-            "clapping": "這個人正在拍手",
-            "reading": "這個人正在閱讀東西",
-            "phoning": "這個人正在打電話",
-            "drinking": "這個人正在喝水",
-            "eating": "這個人正在吃東西",
-            "put on clothes": "這個人正在穿衣服",
-            "take off clothes": "這個人正在脫衣服",
-            "writing": "這個人正在寫字",
-            "typing": "這個人正在打字",
-            "pointing": "這個人正在用手指向某處",
-            "taking photo": "這個人正在拍照",
-            "playing with phone": "這個人正在使用手機",
-            "sleeping": "這個人正在睡覺休息",
+        # 動作描述模板 (簡化版)
+        self.simplified_descriptions = {
+            "坐著": "這個人正在坐著",
+            "站立": "這個人正在站立",
+            "走路": "這個人正在行走",
+            "跑步": "這個人正在跑步",
+            "跳躍": "這個人正在跳躍",
+            "運動/伸展": "這個人正在進行運動或伸展",
+            "打架/衝突": "偵測到可能的衝突動作",
+            "蹲下/低姿態": "這個人正蹲下或彎腰",
+            "躺下/跌倒": "偵測到跌倒或躺下的異常狀態",
+            "靜止/等待": "這個人目前保持靜止",
+            "等待中...": "正在分析動作..."
         }
         
         # 最近的預測結果快取
@@ -148,10 +120,17 @@ class ActionRecognizer:
         # 時序濾波器（每個 ID 一個）
         self.temporal_filters: Dict[int, TemporalFilter] = {}
         
+        # 狀態追蹤：{person_id: {"label": str, "start_time": float}}
+        self.state_tracker: Dict[int, Dict[str, Any]] = {}
+        
     def debug_log(self, msg: str):
         """除錯日誌"""
         if config.debug:
             print(f"[ActionRecognizer][{time.time():.3f}] {msg}")
+
+    def _get_description(self, label: str) -> str:
+        """獲取動作描述"""
+        return self.simplified_descriptions.get(label, f"正在進行 {label}")
     
     def load_model(self) -> bool:
         """
@@ -263,14 +242,13 @@ class ActionRecognizer:
                         # 2. 判斷動作強度類型
                         if motion_magnitude < config.motion.threshold_low:
                             motion_type = "靜止"
-                            # 修正：站立/動作 也應該是靜止時的有效動作（例如站著不動）
-                            valid_actions = ["坐著/靜止", "蹲下/彎腰", "站立/動作"]
+                            valid_actions = ["坐著", "站立", "蹲下/低姿態", "靜止/等待"]
                         elif motion_magnitude > config.motion.threshold_high:
                             motion_type = "劇烈"
-                            valid_actions = ["跳躍", "打鬥/推擠", "跌倒/異常", "走動"]
+                            valid_actions = ["跳躍", "打架/衝突", "躺下/跌倒", "跑步", "走路"]
                         else:
                             motion_type = "移動"
-                            valid_actions = ["站立/動作", "走動", "蹲下/彎腰"]
+                            valid_actions = ["站立", "走路", "運動/伸展", "蹲下/低姿態"]
                             
                         result.motion_status = f"{motion_magnitude:.1f} ({motion_type})"
                         
@@ -279,10 +257,24 @@ class ActionRecognizer:
                         final_confidence = simp_score
                         
                         # (A) 骨架可見性過濾（優先級最高）
-                        if visibility_info and visibility_info.get('is_sitting_likely', False):
-                            if final_action in ["站立/動作", "走動", "跳躍"]:
-                                final_action = "坐著/靜止"
-                                final_confidence = max(0.8, final_confidence)
+                        if visibility_info:
+                            # 如果下半身不可見，極大機率是坐著
+                            if visibility_info.get('is_sitting_likely', False):
+                                if final_action in ["站立", "走路", "跳躍", "跑步"]:
+                                    final_action = "坐著"
+                                    final_confidence = max(0.8, final_confidence)
+                            
+                            # 針對「刷牙/摸頭」等手部動作的邏輯修正：
+                            # 如果手部關鍵點置信度極低，但模型卻預測了需要手的動作（在 mapping 中被歸類為坐或站）
+                            # 我們檢查原始 Top-1 標籤是否屬於手部敏感動作
+                            hand_sensitive_actions = ["刷牙", "梳頭", "吃東西", "喝水", "觸摸頭", "觸摸頸"]
+                            upper_ratio = visibility_info.get('upper_ratio', 0.0)
+                            if result.action_label in hand_sensitive_actions and upper_ratio < 0.4:
+                                # 手部不可見卻判定為手部動作，降級為基礎姿態
+                                if motion_type == "靜止":
+                                    final_action = "坐著"
+                                else:
+                                    final_action = "站立"
                         
                         # (B) 動作強度過濾
                         if final_action not in valid_actions:
@@ -297,16 +289,33 @@ class ActionRecognizer:
                                     found_better = True
                                     break
                             
-                            # 如果都沒找到，且是靜止狀態，強制歸類為坐著/靜止
+                            # 如果都沒找到，且是靜止狀態，強制歸類
                             if not found_better and motion_type == "靜止":
-                                final_action = "坐著/靜止"
+                                final_action = "坐著" if visibility_info and visibility_info.get('is_sitting_likely', False) else "站立"
                                 final_confidence = 0.5
                         
                         # 更新最終結果
                         result.simplified_label = final_action
-                        # 我們可以選擇是否要覆蓋原始的 action_label，或者只使用 simplified_label
-                        # 為了保持相容性，我們更新 action_description 來顯示簡化結果
-                        result.action_description = f"[{final_action}] {result.action_description}"
+                        result.action_label = final_action # 覆蓋原始標籤，讓輸出乾淨
+                        
+                        # === 狀態持續時間追蹤 ===
+                        now = time.time()
+                        if person_id not in self.state_tracker or self.state_tracker[person_id]["label"] != final_action:
+                            self.state_tracker[person_id] = {"label": final_action, "start_time": now}
+                            result.duration = 0.0
+                        else:
+                            result.duration = now - self.state_tracker[person_id]["start_time"]
+                        
+                        # 智慧描述合成：如果是坐著進行特定動作
+                        description = self._get_description(final_action)
+                        if visibility_info and visibility_info.get('is_sitting_likely', False) and final_action != "坐著":
+                            description = f"坐著{description.replace('這個人正在', '')}"
+                        
+                        # 如果動作持續很久，增加描述強度
+                        if result.duration > 10:
+                            description += f" (已持續 {int(result.duration)} 秒)"
+                        
+                        result.action_description = description
                         
                     self.last_results[person_id] = result
                 
@@ -461,15 +470,11 @@ class ActionRecognizer:
             if total_movement > 300:
                 action_scores["跑步"] = min(total_movement / 500, 1.0)
             else:
-                action_scores["行走"] = min(total_movement / 200, 1.0)
-        
-        # 揮手檢測
-        if wrist_movement > 100 and ankle_movement < 50:
-            action_scores["揮手"] = min(wrist_movement / 200, 1.0)
+                action_scores["走路"] = min(total_movement / 200, 1.0)
         
         # 坐下/站立檢測
         if avg_hip_height > 300:  # 較低的髖部位置
-            action_scores["坐下"] = 0.6
+            action_scores["坐著"] = 0.6
         
         # 站立（預設）
         if not action_scores:
@@ -492,27 +497,6 @@ class ActionRecognizer:
             top_k_actions=top_k_actions
         )
     
-    def _get_description(self, action_label: str) -> str:
-        """
-        根據動作標籤獲取描述文字
-        
-        Args:
-            action_label: 動作標籤
-            
-        Returns:
-            描述文字
-        """
-        # 先嘗試精確匹配
-        if action_label in self.action_descriptions:
-            return self.action_descriptions[action_label]
-        
-        # 嘗試小寫匹配
-        if action_label.lower() in self.action_descriptions:
-            return self.action_descriptions[action_label.lower()]
-        
-        # 預設描述
-        return f"這個人正在進行「{action_label}」的動作"
-    
     def recognize_all(
         self, 
         sequences_info: Dict[int, Dict[str, Any]]
@@ -527,6 +511,15 @@ class ActionRecognizer:
             字典，鍵為人物 ID，值為動作識別結果
         """
         results = {}
+        
+        # 清理已經消失的人物 ID
+        current_ids = set(sequences_info.keys())
+        ids_to_remove = [pid for pid in self.last_results.keys() if pid not in current_ids]
+        for pid in ids_to_remove:
+            self.last_results.pop(pid, None)
+            self.temporal_filters.pop(pid, None)
+            self.state_tracker.pop(pid, None)
+            
         for person_id, info in sequences_info.items():
             sequence = info.get('sequence')
             motion = info.get('motion', 0.0)
@@ -557,7 +550,8 @@ class ActionRecognizer:
         lines.append("=" * 40)
         
         for person_id, result in sorted(self.last_results.items()):
-            lines.append(f"\n👤 人物 {person_id + 1}:")
+            # 顯示 ReID 的 Person ID
+            lines.append(f"\n👤 人物 (ID: {person_id}):")
             
             # 優先顯示簡化標籤
             if result.simplified_label:
@@ -642,17 +636,19 @@ class ActionRecognizerAsync:
                 sequences_info = self.latest_sequences_info
                 self.latest_sequences_info = None
             
-            if sequences_info:
+            if sequences_info is not None:
                 if config.debug:
                     print(f"[ActionRecognizerAsync] Processing {len(sequences_info)} person(s)")
                 results = self.recognizer.recognize_all(sequences_info)
-                if results:
-                    self.latest_results = results
-                    if config.debug:
-                        print(f"[ActionRecognizerAsync] Got {len(results)} result(s)")
-                else:
-                    if config.debug:
-                        print("[ActionRecognizerAsync] No results returned")
+                
+                # 即使結果為空也更新，這樣才能刪除消失的人物
+                self.latest_results = results
+                
+                if config.debug:
+                    print(f"[ActionRecognizerAsync] Got {len(results)} result(s)")
+            else:
+                if config.debug:
+                    print("[ActionRecognizerAsync] No sequences info to process")
     
     def get_results(self) -> Dict[int, ActionResult]:
         """獲取最新的識別結果"""
