@@ -623,7 +623,21 @@ def main():
     print()
     
     app = WE_MMA_Sender_App()
-    app.run()
+    
+    try:
+        app.run()
+    except KeyboardInterrupt:
+        print("\n[WE_MMA_Sender] 收到中斷信號，正在關閉...")
+        app._cleanup()
+        try:
+            app.root.destroy()
+        except:
+            pass
+        sys.exit(0)
+    except Exception as e:
+        print(f"\n[WE_MMA_Sender] 發生未預期的錯誤: {e}")
+        app._cleanup()
+        sys.exit(1)
 
 
 if __name__ == "__main__":

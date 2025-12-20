@@ -302,13 +302,13 @@ class WebcamSource:
                 
                 # 提取骨架
                 yolo_start = time.time()
-                keypoints_raw, boxes_raw = [], []
+                keypoints_raw, boxes_raw, track_ids = [], [], []
                 if self.pose_extractor and self.pose_extractor.ready:
-                    keypoints_raw, boxes_raw = self.pose_extractor.extract(frame)
+                    keypoints_raw, boxes_raw, track_ids = self.pose_extractor.extract(frame)
                 yolo_time = (time.time() - yolo_start) * 1000
                 
                 # 格式化關鍵點（WiseEye2 格式）
-                keypoints_formatted = self._format_keypoints(keypoints_raw, boxes_raw)
+                keypoints_formatted = self._format_keypoints(keypoints_raw, boxes_raw, track_ids)
                 with self.data_lock:
                     self.latest_keypoints = keypoints_formatted
                 
@@ -360,7 +360,8 @@ class WebcamSource:
         
         self.debug_log("Capture loop ended")
     
-    def _format_keypoints(self, keypoints_list: List, boxes_list: List) -> List[List[Any]]:
+    def _format_keypoints(self, keypoints_list: List, boxes_list: List, 
+                          track_ids: Optional[List[int]] = None) -> List[List[Any]]:
         """
         格式化關鍵點為 WiseEye2 格式
         
@@ -368,17 +369,22 @@ class WebcamSource:
         """
         formatted_persons = []
         
-        for kpts, box in zip(keypoints_list, boxes_list):
+        # 如果沒有提供 track_ids，使用索引
+        if track_ids is None:
+            track_ids = list(range(len(keypoints_list)))
+        
+        for idx, (kpts, box) in enumerate(zip(keypoints_list, boxes_list)):
+            track_id = track_ids[idx] if idx < len(track_ids) else idx
             x1, y1, x2, y2, conf = box[:5]
             w, h = x2 - x1, y2 - y1
             
-            # box_data: [x, y, w, h, confidence, target]
-            box_data = [float(x1), float(y1), float(w), float(h), float(conf * 100), 0]
+            # box_data: [x, y, w, h, confidence, target] - 使用追蹤 ID
+            box_data = [float(x1), float(y1), float(w), float(h), float(conf * 100), int(track_id)]
             
             # 關鍵點列表
             kpt_list = []
             for k in kpts:
-                kpt_list.append([float(k[0]), float(k[1]), float(k[2]), 0])
+                kpt_list.append([float(k[0]), float(k[1]), float(k[2]), int(track_id)])
             
             person_data = [box_data] + kpt_list
             formatted_persons.append(person_data)
