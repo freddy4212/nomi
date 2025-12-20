@@ -1,0 +1,27 @@
+# macOS
+.DS_Store
+
+# VScode
+.vscode
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.env
+.venv
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Logs
+*.log
+
+# Output files
+*.img
+
+# Submodules
+observation_layer/mmaction2/
