@@ -299,10 +299,8 @@ class SkeletonProcessor:
             num_keypoints=config.skeleton.num_keypoints,
             target_fps=config.interpolation.target_fps,
             one_euro_min_cutoff=0.5,  # 針對低 FPS 優化
-            confidence_threshold=0.1, # 降低閾值以包含更多點
-        )
             one_euro_beta=0.01,       # 針對低 FPS 優化
-            confidence_threshold=config.skeleton.confidence_threshold
+            confidence_threshold=0.1, # 降低閾值以包含更多點
         )
         
         # 人物追蹤器（簡單的 ID 分配）
