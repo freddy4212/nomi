@@ -89,7 +89,7 @@ class SkeletonOneEuroFilter:
         num_keypoints: int = 17, 
         min_cutoff: float = 0.8,  # 低 FPS 建議使用較低值
         beta: float = 0.01,       # 低 FPS 建議使用較高值
-        confidence_threshold: float = 0.3
+        confidence_threshold: float = 0.1
     ):
         self.num_keypoints = num_keypoints
         self.min_cutoff = min_cutoff
@@ -531,7 +531,7 @@ class SkeletonPreprocessor:
         one_euro_min_cutoff: float = 0.5,
         one_euro_beta: float = 0.01,
         # 置信度閾值
-        confidence_threshold: float = 0.3
+        confidence_threshold: float = 0.1
     ):
         self.num_keypoints = num_keypoints
         self.target_fps = target_fps

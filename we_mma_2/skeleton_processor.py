@@ -35,6 +35,11 @@ class PersonSkeleton:
     keypoints: np.ndarray  # shape: (17, 3) - (x, y, score) - 原始關鍵點
     timestamp: float  # 時間戳
     smoothed_keypoints: Optional[np.ndarray] = None  # 平滑後的關鍵點（用於補幀和動作識別）
+    reid_vector: Optional[np.ndarray] = None  # ReID 特徵向量
+    is_visible: bool = True  # 人物是否在畫面中
+    last_seen_time: float = 0.0  # 最後一次被偵測到的時間戳
+    disappear_direction: Optional[str] = None  # 消失方向 (left, right, top, bottom)
+    _visibility_event_sent: bool = False  # 內部標記：是否已發送離開事件
     
     def get_keypoints(self, use_smoothed: bool = False) -> np.ndarray:
         """
@@ -130,7 +135,8 @@ class SkeletonSmoother:
             curr_score = max(0.0, min(1.0, curr_score))
             
             # 如果當前位置是 (0, 0) 或置信度太低，使用前一幀
-            if (curr_pos[0] == 0 and curr_pos[1] == 0) or curr_score < 0.3:
+            # 修改：降低閾值以包含更多點 (0.3 -> 0.1)
+            if (curr_pos[0] == 0 and curr_pos[1] == 0) or curr_score < 0.1:
                 smoothed[i, :2] = self.states[person_id][i, :2]  # 使用平滑狀態而非原始前一幀
                 smoothed[i, 2] = max(prev_score * 0.9, 0.1)  # 置信度衰減
                 self.anomaly_count[person_id][i] = min(self.anomaly_count[person_id][i] + 1, 10)
@@ -293,12 +299,22 @@ class SkeletonProcessor:
             num_keypoints=config.skeleton.num_keypoints,
             target_fps=config.interpolation.target_fps,
             one_euro_min_cutoff=0.5,  # 針對低 FPS 優化
+            confidence_threshold=0.1, # 降低閾值以包含更多點
+        )
             one_euro_beta=0.01,       # 針對低 FPS 優化
             confidence_threshold=config.skeleton.confidence_threshold
         )
         
         # 人物追蹤器（簡單的 ID 分配）
         self.person_tracker: Dict[int, PersonSkeleton] = {}
+        
+        # ID 映射：將 Sender 的追蹤 ID 映射為從 0 開始的連續本地 ID
+        self._sender_to_local_id: Dict[int, int] = {}
+        self._next_local_id: int = 0
+        
+        # 離開偵測配置
+        self.disappear_timeout: float = 1.5  # 超過 1.5 秒未偵測到即視為離開
+        self.remove_timeout: float = 30.0  # 超過 30 秒後從追蹤器中移除
         
         # 補幀計數器
         self.interpolated_frame_count = 0
@@ -338,6 +354,7 @@ class SkeletonProcessor:
         keypoints = target_person.get_keypoints(use_smoothed=True)
         
         # 定義上半身和下半身索引
+        # COCO 格式: 0=鼻子, 1-4=眼睛耳朵, 5-10=肩膀手肘手腕, 11-12=髖部, 13-14=膝蓋, 15-16=腳踝
         UPPER_BODY_INDICES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]  # 頭 + 手臂
         LOWER_BODY_INDICES = [11, 12, 13, 14, 15, 16]  # 髖 + 腿
         
@@ -352,9 +369,143 @@ class SkeletonProcessor:
         upper_ratio = upper_visible / len(UPPER_BODY_INDICES)
         lower_ratio = lower_visible / len(LOWER_BODY_INDICES)
         
-        # 判斷是否可能坐著：上半身可見但下半身可見度低
-        # 放寬判定標準：只要下半身有一半以上不可見，且上半身清晰，就極大機率是坐著（被桌子遮擋）
-        is_sitting_likely = (upper_ratio >= 0.5 and lower_ratio < 0.5)
+        # === 基於骨架幾何的坐姿判斷 ===
+        is_sitting_likely = False
+        
+        # 方法 1: 下半身不可見（被桌子等遮擋）
+        if upper_ratio >= 0.5 and lower_ratio < 0.5:
+            is_sitting_likely = True
+        
+        # 方法 2: 基於關鍵點位置判斷（髖、膝、踝的相對位置）
+        # 坐著時，膝蓋和髖部的 Y 座標差距會比站著小很多
+        # 索引: 11=左髖, 12=右髖, 13=左膝, 14=右膝, 15=左踝, 16=右踝
+        if not is_sitting_likely and lower_ratio >= 0.5:
+            left_hip = keypoints[11]
+            right_hip = keypoints[12]
+            left_knee = keypoints[13]
+            right_knee = keypoints[14]
+            left_ankle = keypoints[15]
+            right_ankle = keypoints[16]
+            
+            # 檢查關鍵點是否有效
+            hip_valid = left_hip[2] >= confidence_threshold or right_hip[2] >= confidence_threshold
+            knee_valid = left_knee[2] >= confidence_threshold or right_knee[2] >= confidence_threshold
+            ankle_valid = left_ankle[2] >= confidence_threshold or right_ankle[2] >= confidence_threshold
+            
+            if hip_valid and knee_valid:
+                # 計算平均髖部和膝蓋 Y 座標
+                hip_y = 0
+                hip_count = 0
+                if left_hip[2] >= confidence_threshold:
+                    hip_y += left_hip[1]
+                    hip_count += 1
+                if right_hip[2] >= confidence_threshold:
+                    hip_y += right_hip[1]
+                    hip_count += 1
+                hip_y = hip_y / hip_count if hip_count > 0 else 0
+                
+                knee_y = 0
+                knee_count = 0
+                if left_knee[2] >= confidence_threshold:
+                    knee_y += left_knee[1]
+                    knee_count += 1
+                if right_knee[2] >= confidence_threshold:
+                    knee_y += right_knee[1]
+                    knee_count += 1
+                knee_y = knee_y / knee_count if knee_count > 0 else 0
+                
+                # 計算頭部 Y 座標（鼻子或肩膀作為備選）
+                nose_y = keypoints[0][1] if keypoints[0][2] >= confidence_threshold else 0
+                if nose_y == 0:
+                    # 嘗試用肩膀平均值
+                    left_shoulder = keypoints[5]
+                    right_shoulder = keypoints[6]
+                    if left_shoulder[2] >= confidence_threshold:
+                        nose_y = left_shoulder[1]
+                    elif right_shoulder[2] >= confidence_threshold:
+                        nose_y = right_shoulder[1]
+                
+                # 坐著時，髖部到膝蓋的距離會很小（接近水平）
+                # 站著時，髖部到膝蓋會有明顯的垂直距離
+                hip_knee_dist = abs(knee_y - hip_y)
+                
+                # 計算身體總高度（頭到髖的距離）作為參考
+                body_height = abs(hip_y - nose_y) if nose_y > 0 else 100
+                
+                # 正規化：坐著時 hip_knee_ratio 通常 < 0.5，站著時 > 0.6
+                # 修正：收緊閾值，避免站立被誤判為坐著
+                hip_knee_ratio = hip_knee_dist / body_height if body_height > 0 else 0
+                
+                # 新增：大腿水平判斷 (Thigh Horizontal Check)
+                # 如果大腿的水平距離大於垂直距離的一定比例，表示大腿是平放的（坐姿）
+                # 計算左右大腿的投影
+                is_thigh_horizontal = False
+                if hip_valid and knee_valid:
+                    # 左大腿
+                    if left_hip[2] >= confidence_threshold and left_knee[2] >= confidence_threshold:
+                        l_dx = abs(left_knee[0] - left_hip[0])
+                        l_dy = abs(left_knee[1] - left_hip[1])
+                        if l_dx > l_dy * 1.0: # 嚴格化：水平分量必須大於垂直分量
+                            is_thigh_horizontal = True
+                    # 右大腿
+                    if not is_thigh_horizontal and right_hip[2] >= confidence_threshold and right_knee[2] >= confidence_threshold:
+                        r_dx = abs(right_knee[0] - right_hip[0])
+                        r_dy = abs(right_knee[1] - right_hip[1])
+                        if r_dx > r_dy * 1.0:
+                            is_thigh_horizontal = True
+
+                # 另外檢查膝蓋的彎曲：如果腳踝 Y 座標接近或高於膝蓋，表示腿是彎曲的
+                if ankle_valid and knee_count > 0:
+                    ankle_y = 0
+                    ankle_count = 0
+                    if left_ankle[2] >= confidence_threshold:
+                        ankle_y += left_ankle[1]
+                        ankle_count += 1
+                    if right_ankle[2] >= confidence_threshold:
+                        ankle_y += right_ankle[1]
+                        ankle_count += 1
+                    ankle_y = ankle_y / ankle_count if ankle_count > 0 else 0
+                    
+                    knee_ankle_dist = abs(ankle_y - knee_y)
+                    
+                    # 坐著時膝蓋到腳踝的距離也會較短
+                    # 收緊閾值：hip_knee_ratio < 0.55 (原 0.6) 且 knee_ankle_dist < 0.55 * body_height
+                    if hip_knee_ratio < 0.55 and knee_ankle_dist < body_height * 0.55:
+                        is_sitting_likely = True
+                    # 額外判斷：如果膝蓋非常接近髖部（比例 < 0.35），直接判定為坐著
+                    elif hip_knee_ratio < 0.35:
+                        is_sitting_likely = True
+                    # 如果大腿是水平的，極大機率是坐著
+                    elif is_thigh_horizontal:
+                        is_sitting_likely = True
+                        
+                elif hip_knee_ratio < 0.45: # 收緊無腳踝時的閾值 (原 0.5)
+                    # 沒有腳踝資料，但髖膝距離小
+                    is_sitting_likely = True
+                elif is_thigh_horizontal:
+                    # 沒有腳踝資料，但大腿水平
+                    is_sitting_likely = True
+                
+                # === 強制站立檢查 ===
+                # 如果髖膝垂直距離很大（接近或超過身長），這絕對是站立
+                if hip_knee_ratio > 0.7:
+                    is_sitting_likely = False
+        
+        # 方法 3: 基於邊界框比例判斷
+        # 坐著時，人的邊界框高寬比通常接近 1:1 或更扁
+        # 站著時，高寬比通常 > 1.5
+        if not is_sitting_likely and target_person.box is not None:
+            x, y, w, h = target_person.box
+            if w > 0:
+                aspect_ratio = h / w
+                # 如果高寬比 < 1.2 (原 1.35)，且不是全身可見（可能腿被遮擋），極可能是坐著
+                if aspect_ratio < 1.2:
+                    # 如果下半身可見度低，更加確認
+                    if lower_ratio < 0.6:
+                        is_sitting_likely = True
+                    # 如果比例非常扁 (< 1.0)，直接判定
+                    elif aspect_ratio < 1.0:
+                        is_sitting_likely = True
         
         # 判斷是否全身可見
         is_full_body = (upper_ratio >= 0.7 and lower_ratio >= 0.7)
@@ -476,14 +627,24 @@ class SkeletonProcessor:
             處理後的骨架幀，如果沒有檢測到人則返回 None
         """
         if not frame_data.keypoints:
-            return SkeletonFrame(
+            # 沒有偵測到任何人，更新所有追蹤中的人為不可見
+            self._update_invisible_persons(frame_data.timestamp, set())
+            empty_frame = SkeletonFrame(
                 timestamp=frame_data.timestamp,
                 frame_no=frame_data.frame_no,
                 persons=[]
             )
+            # 將空幀加入 interpolated_buffer，這樣 Receiver 才能知道沒有人
+            self._add_to_interpolated_buffer(empty_frame)
+            # 重設 ID 映射（沒有人時重新從 0 開始）
+            self._sender_to_local_id.clear()
+            self._next_local_id = 0
+            return empty_frame
         
         persons = []
         interpolated_persons_list = []  # 儲存每個人的插值幀
+        detected_person_ids = set()  # 本幀偵測到的人物 ID（本地 ID）
+        current_sender_ids = set()  # 本幀 Sender 傳來的原始 ID
         
         for idx, person_data in enumerate(frame_data.keypoints):
             if not person_data or len(person_data) < 1:
@@ -497,9 +658,22 @@ class SkeletonProcessor:
             x, y, w, h, score, target = box_data[:6]
             box = (int(x), int(y), int(w), int(h))
             
-            # 使用 ReID 的 Person ID (target)
-            # 如果 target 為 -1 或無效，則回退到索引 idx
-            person_id = int(target) if target >= 0 else idx
+            # Sender 傳來的原始追蹤 ID
+            sender_id = int(target) if target >= 0 else idx
+            current_sender_ids.add(sender_id)
+            
+            # 將 Sender ID 映射為本地 ID（從 0 開始）
+            if sender_id not in self._sender_to_local_id:
+                self._sender_to_local_id[sender_id] = self._next_local_id
+                self._next_local_id += 1
+            person_id = self._sender_to_local_id[sender_id]
+            
+            # 獲取對應的 ReID 向量 (與 keypoints 索引對應)
+            reid_vector = None
+            if hasattr(frame_data, 'reid_results') and idx < len(frame_data.reid_results):
+                reid_vector = frame_data.reid_results[idx]
+                if reid_vector is not None:
+                    reid_vector = np.array(reid_vector, dtype=np.float32)
             
             # 解析關鍵點
             keypoints = self._parse_keypoints(person_data[1:])
@@ -525,17 +699,43 @@ class SkeletonProcessor:
                     score=float(score),
                     keypoints=keypoints.copy(),  # 保存原始關鍵點
                     timestamp=frame_data.timestamp,
-                    smoothed_keypoints=smoothed_keypoints  # 保存平滑後的關鍵點
+                    smoothed_keypoints=smoothed_keypoints,  # 保存平滑後的關鍵點
+                    reid_vector=reid_vector,  # 保存 ReID 向量
+                    is_visible=True,
+                    last_seen_time=frame_data.timestamp
                 )
                 persons.append(person)
-                interpolated_persons_list.append((person_id, box, float(score), interp_frames))
+                detected_person_ids.add(person_id)
+                interpolated_persons_list.append((person_id, box, float(score), interp_frames, reid_vector))
+                
+                # 更新人物追蹤器狀態
+                self.person_tracker[person_id] = person
+        
+        # 清理已離開的人的 ID 映射
+        stale_sender_ids = [sid for sid in self._sender_to_local_id if sid not in current_sender_ids]
+        for sid in stale_sender_ids:
+            del self._sender_to_local_id[sid]
+        
+        # 如果所有人都離開了，重設 ID 計數器
+        if len(self._sender_to_local_id) == 0:
+            self._next_local_id = 0
+        
+        # 更新未偵測到的人物狀態（離開偵測）
+        self._update_invisible_persons(frame_data.timestamp, detected_person_ids)
         
         if not persons:
-            return SkeletonFrame(
+            # 沒有偵測到任何人，建立空幀並加入緩衝區
+            empty_frame = SkeletonFrame(
                 timestamp=frame_data.timestamp,
                 frame_no=frame_data.frame_no,
                 persons=[]
             )
+            # 將空幀加入 interpolated_buffer，這樣 Receiver 才能知道沒有人
+            self._add_to_interpolated_buffer(empty_frame)
+            # 重設 ID 映射
+            self._sender_to_local_id.clear()
+            self._next_local_id = 0
+            return empty_frame
         
         skeleton_frame = SkeletonFrame(
             timestamp=frame_data.timestamp,
@@ -553,7 +753,7 @@ class SkeletonProcessor:
     
     def _add_interpolated_frames(
         self, 
-        interpolated_persons_list: List[Tuple[int, Tuple, float, List[np.ndarray]]],
+        interpolated_persons_list: List[Tuple[int, Tuple, float, List[np.ndarray], Optional[np.ndarray]]],
         base_timestamp: float,
         frame_no: int
     ):
@@ -564,7 +764,7 @@ class SkeletonProcessor:
             return
         
         # 找出最多的插值幀數
-        max_frames = max(len(frames) for _, _, _, frames in interpolated_persons_list) if interpolated_persons_list else 0
+        max_frames = max(len(frames) for _, _, _, frames, _ in interpolated_persons_list) if interpolated_persons_list else 0
         
         if max_frames == 0:
             return
@@ -574,7 +774,7 @@ class SkeletonProcessor:
         for frame_idx in range(max_frames):
             interp_persons = []
             
-            for person_id, box, score, frames in interpolated_persons_list:
+            for person_id, box, score, frames, reid_vector in interpolated_persons_list:
                 if frame_idx < len(frames):
                     interp_kpts = frames[frame_idx]
                     
@@ -584,7 +784,8 @@ class SkeletonProcessor:
                         score=score,
                         keypoints=interp_kpts,  # 插值幀沒有真正的原始資料
                         timestamp=base_timestamp,
-                        smoothed_keypoints=interp_kpts
+                        smoothed_keypoints=interp_kpts,
+                        reid_vector=reid_vector
                     )
                     interp_persons.append(interp_person)
             
@@ -710,7 +911,31 @@ class SkeletonProcessor:
                 # 使用平滑後的關鍵點進行插值
                 prev_kp = prev_person.get_keypoints(use_smoothed=True)
                 curr_kp = curr_person.get_keypoints(use_smoothed=True)
-                interp_keypoints = (1 - t_smooth) * prev_kp + t_smooth * curr_kp
+                
+                # === 智能插值邏輯 (防止點飛向原點) ===
+                interp_keypoints = np.zeros_like(prev_kp)
+                
+                # 1. 分數插值 (線性)
+                interp_keypoints[:, 2] = (1 - t_smooth) * prev_kp[:, 2] + t_smooth * curr_kp[:, 2]
+                
+                # 2. 位置插值
+                # 判斷有效性 (score > 0.1 且不是原點)
+                p_valid = (prev_kp[:, 2] > 0.1) & ((prev_kp[:, 0] > 1) | (prev_kp[:, 1] > 1))
+                c_valid = (curr_kp[:, 2] > 0.1) & ((curr_kp[:, 0] > 1) | (curr_kp[:, 1] > 1))
+                
+                # Case 1: 兩者都有效 -> 正常插值
+                both_valid = p_valid & c_valid
+                interp_keypoints[both_valid, :2] = (1 - t_smooth) * prev_kp[both_valid, :2] + t_smooth * curr_kp[both_valid, :2]
+                
+                # Case 2: 只有前一幀有效 -> 保持前一幀位置 (避免飛向原點)
+                only_p = p_valid & (~c_valid)
+                interp_keypoints[only_p, :2] = prev_kp[only_p, :2]
+                
+                # Case 3: 只有當前幀有效 -> 使用當前幀位置
+                only_c = (~p_valid) & c_valid
+                interp_keypoints[only_c, :2] = curr_kp[only_c, :2]
+                
+                # Case 4: 都無效 -> 保持 0 (已由 zeros_like 初始化)
                 
                 # 平滑插值邊界框
                 px, py, pw, ph = prev_person.box
@@ -852,6 +1077,76 @@ class SkeletonProcessor:
         self.person_tracker.clear()
         self.preprocessor.reset()  # 使用新的預處理器
         self.interpolated_frame_count = 0
-
-
-
+    
+    def _update_invisible_persons(self, current_time: float, detected_ids: set):
+        """
+        更新未偵測到的人物狀態
+        
+        Args:
+            current_time: 當前時間戳
+            detected_ids: 本幀偵測到的人物 ID 集合
+        """
+        persons_to_remove = []
+        
+        for person_id, person in self.person_tracker.items():
+            if person_id not in detected_ids:
+                # 這個人本幀沒有被偵測到
+                time_since_seen = current_time - person.last_seen_time
+                
+                if person.is_visible:
+                    # 檢查是否超過消失超時
+                    if time_since_seen >= self.disappear_timeout:
+                        # 標記為不可見
+                        person.is_visible = False
+                        
+                        # 計算消失方向（根據最後位置）
+                        x, y, w, h = person.box
+                        cx, cy = x + w // 2, y + h // 2
+                        
+                        # 假設畫面是 640x480 (根據實際配置調整)
+                        frame_w, frame_h = 640, 480
+                        
+                        # 判斷消失方向
+                        if cx < frame_w * 0.2:
+                            person.disappear_direction = "left"
+                        elif cx > frame_w * 0.8:
+                            person.disappear_direction = "right"
+                        elif cy < frame_h * 0.2:
+                            person.disappear_direction = "top"
+                        elif cy > frame_h * 0.8:
+                            person.disappear_direction = "bottom"
+                        else:
+                            person.disappear_direction = "unknown"
+                        
+                        self.debug_log(f"Person {person_id} disappeared to {person.disappear_direction} (timeout: {time_since_seen:.1f}s)")
+                
+                # 檢查是否超過移除超時
+                if time_since_seen >= self.remove_timeout:
+                    persons_to_remove.append(person_id)
+                    self.debug_log(f"Person {person_id} removed from tracker (unseen for {time_since_seen:.1f}s)")
+        
+        # 移除過期的人物
+        for person_id in persons_to_remove:
+            del self.person_tracker[person_id]
+    
+    def get_visible_persons(self) -> List[int]:
+        """
+        獲取當前可見的人物 ID 列表
+        
+        Returns:
+            可見人物的 ID 列表
+        """
+        return [pid for pid, p in self.person_tracker.items() if p.is_visible]
+    
+    def get_invisible_persons(self) -> List[Tuple[int, str, Tuple[int, int, int, int]]]:
+        """
+        獲取當前不可見但仍在追蹤中的人物資訊
+        
+        Returns:
+            [(person_id, disappear_direction, last_bbox), ...]
+        """
+        return [
+            (pid, p.disappear_direction, p.box) 
+            for pid, p in self.person_tracker.items() 
+            if not p.is_visible
+        ]

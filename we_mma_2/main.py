@@ -5,6 +5,7 @@ main.py - WE_MMA_2 主程式入口
 - 整合所有子模組
 - 管理程式生命週期
 - 協調各模組之間的資料流
+- 連接記憶層系統（Home Agent Memory Layer）
 
 使用方式：
     python -m we_mma_2.main
@@ -27,6 +28,8 @@ if __name__ == "__main__" or __package__ is None:
                                             ActionRecognizerAsync)
     from we_mma_2.config import config
     from we_mma_2.gui_interface import GUIInterface
+    from we_mma_2.memory_bridge import (MemoryBridge,
+                                        create_memory_bridge_if_available)
     from we_mma_2.serial_receiver import FrameData, SerialReceiver
     from we_mma_2.skeleton_processor import SkeletonFrame, SkeletonProcessor
 else:
@@ -34,6 +37,7 @@ else:
     from .action_recognizer import ActionRecognizer, ActionRecognizerAsync
     from .config import config
     from .gui_interface import GUIInterface
+    from .memory_bridge import MemoryBridge, create_memory_bridge_if_available
     from .serial_receiver import FrameData, SerialReceiver
     from .skeleton_processor import SkeletonFrame, SkeletonProcessor
 
@@ -55,6 +59,16 @@ class WE_MMA_2_App:
         self.serial_receiver = SerialReceiver(on_frame_received=self._on_frame_received)
         self.skeleton_processor = SkeletonProcessor()
         self.action_recognizer = ActionRecognizerAsync()
+        
+        # 初始化記憶層橋接（Home Agent Memory Layer）
+        self.memory_bridge: Optional[MemoryBridge] = create_memory_bridge_if_available()
+        if self.memory_bridge:
+            self.debug_log("Memory Layer bridge initialized")
+        else:
+            self.debug_log("Memory Layer not available, running without persistence")
+        
+        # 幀編號計數器（用於記憶層）
+        self.frame_counter: int = 0
         
         # 設定 GUI 回調
         self.gui.on_connect = self._on_connect
@@ -88,8 +102,14 @@ class WE_MMA_2_App:
         if success:
             # 清空緩衝區
             self.skeleton_processor.clear()
+            # 重置幀計數器
+            self.frame_counter = 0
             # 啟動異步動作識別
             self.action_recognizer.start()
+            # 啟動記憶層
+            if self.memory_bridge:
+                self.memory_bridge.start()
+                self.debug_log("Memory Layer started")
             self.debug_log(f"Connected to {port}")
         return success
     
@@ -98,6 +118,10 @@ class WE_MMA_2_App:
         self.serial_receiver.disconnect()
         self.action_recognizer.stop()
         self.skeleton_processor.clear()
+        # 停止記憶層
+        if self.memory_bridge:
+            self.memory_bridge.stop()
+            self.debug_log("Memory Layer stopped")
         self.debug_log("Disconnected")
     
     def _on_frame_received(self, frame_data: FrameData):
@@ -107,6 +131,9 @@ class WE_MMA_2_App:
         Args:
             frame_data: 接收到的幀資料
         """
+        # 增加幀計數器
+        self.frame_counter += 1
+        
         # 處理骨架資料
         skeleton_frame = self.skeleton_processor.process_frame(frame_data)
         
@@ -143,8 +170,50 @@ class WE_MMA_2_App:
             action_text = self.action_recognizer.get_formatted_description()
             self.gui.update_action_text(action_text)
             
+            # === 發送動作識別結果到記憶層 ===
+            if self.memory_bridge:
+                self._send_to_memory_layer()
+            
         except Exception as e:
             self.debug_log(f"GUI update error: {e}")
+    
+    def _send_to_memory_layer(self):
+        """發送動作識別結果到記憶層"""
+        try:
+            # 獲取所有動作識別結果
+            results = self.action_recognizer.get_results()
+            
+            for person_id, result in results.items():
+                # 獲取額外的上下文資訊
+                motion = self.skeleton_processor.get_motion_magnitude(person_id)
+                
+                # 獲取邊界框
+                bbox = None
+                if self.skeleton_processor.interpolated_buffer:
+                    latest_frame = self.skeleton_processor.interpolated_buffer[-1]
+                    for p in latest_frame.persons:
+                        if p.person_id == person_id:
+                            bbox = p.box
+                            break
+                
+                # 構建候選動作列表 [(label, score), ...]
+                action_candidates = result.top_k_actions if result.top_k_actions else []
+                
+                # 發送到記憶層
+                self.memory_bridge.send_action_result(
+                    person_id=person_id,
+                    frame_no=self.frame_counter,
+                    bbox=bbox,
+                    action_label=result.simplified_label or result.action_label,
+                    action_confidence=result.confidence,
+                    action_candidates=action_candidates,
+                    action_duration=result.duration,
+                    motion_magnitude=motion,
+                    reid_vector=None  # TODO: 未來加入 ReID 向量
+                )
+                
+        except Exception as e:
+            self.debug_log(f"Memory bridge error: {e}")
     
     def _try_action_recognition(self):
         """嘗試進行動作識別"""
@@ -186,9 +255,6 @@ class WE_MMA_2_App:
                 
         except Exception as e:
             self.debug_log(f"Action recognition error: {e}")
-                
-        except Exception as e:
-            self.debug_log(f"Action recognition error: {e}")
     
     def run(self):
         """啟動應用程式"""
@@ -211,6 +277,10 @@ class WE_MMA_2_App:
         self.debug_log("Cleaning up...")
         self.serial_receiver.disconnect()
         self.action_recognizer.stop()
+        # 停止記憶層
+        if self.memory_bridge:
+            self.memory_bridge.stop()
+            self.debug_log("Memory Layer stopped during cleanup")
 
 
 def main():

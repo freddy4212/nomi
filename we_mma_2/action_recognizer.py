@@ -268,25 +268,34 @@ class ActionRecognizer:
                                 x, y, w, h = bbox
                                 aspect_ratio = h / w if w > 0 else 0
                                 # 強化比例判定：
-                                # 1. 如果比例明顯是長方形（站立通常 > 1.3），則極大機率是站立
-                                if aspect_ratio > 1.3:
+                                # 1. 如果比例明顯是長方形（站立通常 > 1.5），則極大機率是站立
+                                # 修正：將閾值從 2.0 調回 1.5，避免站立被誤判
+                                if aspect_ratio > 1.5:
                                     is_sitting_likely = False
                                 # 2. 如果比例接近正方形或更扁，且下半身可見度不高，極大機率是坐著
-                                elif aspect_ratio < 1.1:
+                                # 修正：將閾值從 1.3 調回 1.2
+                                elif aspect_ratio < 1.2:
                                     is_sitting_likely = True
                         
                         # (A) 骨架可見性與比例過濾（優先級最高）
                         if visibility_info:
                             # 如果判定為坐著，強制修正站立類動作
                             if is_sitting_likely:
-                                if final_action in ["站立", "走路", "跳躍", "跑步", "靜止/等待", "運動/伸展"]:
+                                # 強制覆蓋所有非躺下的動作
+                                # 增加保護：如果長寬比 > 1.4，即使 is_sitting_likely 為真也不強制覆蓋（除非是極端情況）
+                                if final_action not in ["躺下/跌倒"] and aspect_ratio < 1.4:
                                     final_action = "坐著"
-                                    final_confidence = max(0.8, final_confidence)
+                                    # 提升信心度，確保顯示為確定的坐姿
+                                    final_confidence = max(0.9, final_confidence)
+                                    
                             # 反之，如果判定為站立，但模型誤判為坐著或運動（可能是因為手部動作誤導）
                             elif not is_sitting_likely:
                                 if final_action in ["坐著", "運動/伸展"] and motion_type != "劇烈":
-                                    final_action = "站立"
-                                    final_confidence = 0.7
+                                    # 只有在比例明確顯示為站立時才強制修正
+                                    # 修正：將閾值從 1.6 調回 1.4
+                                    if aspect_ratio > 1.4:
+                                        final_action = "站立"
+                                        final_confidence = 0.7
                             
                             # 針對「刷牙/摸頭」等手部動作的邏輯修正：
                             hand_sensitive_actions = ["刷牙", "梳頭", "吃東西", "喝水", "觸摸頭", "觸摸頸"]

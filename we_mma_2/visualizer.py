@@ -39,7 +39,7 @@ class Visualizer:
     def draw_skeleton(frame: np.ndarray, keypoints: np.ndarray, 
                       person_id: Optional[int] = None,
                       box: Optional[Tuple[int, int, int, int]] = None,
-                      thickness: int = 2, conf_threshold: float = 0.3,
+                      thickness: int = 2, conf_threshold: float = 0.1,
                       show_confidence: bool = False) -> np.ndarray:
         """
         繪製單人骨架
@@ -60,8 +60,8 @@ class Visualizer:
         
         def is_valid_point(idx):
             """檢查關鍵點是否有效（置信度夠高且座標在畫面範圍內）"""
-            # 下半身使用更高的閾值，因為常常是錯誤推測
-            threshold = 0.5 if idx in LOWER_BODY_INDICES else conf_threshold
+            # 修改：移除下半身特殊閾值，統一使用 conf_threshold (0.1)
+            threshold = conf_threshold
             if idx >= len(keypoints): return False
             if keypoints[idx, 2] <= threshold:
                 return False
