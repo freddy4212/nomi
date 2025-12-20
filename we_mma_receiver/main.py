@@ -24,12 +24,16 @@ from typing import Optional
 if __name__ == "__main__" or __package__ is None:
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from we_mma_2.action_recognizer import ActionRecognizerAsync
+    from we_mma_2.memory_bridge import (MemoryBridge,
+                                        create_memory_bridge_if_available)
     from we_mma_2.skeleton_processor import SkeletonFrame, SkeletonProcessor
     from we_mma_receiver.config import config
     from we_mma_receiver.gui_interface import ReceiverGUIInterface
     from we_mma_receiver.network_receiver import FrameData, NetworkReceiver
 else:
     from we_mma_2.action_recognizer import ActionRecognizerAsync
+    from we_mma_2.memory_bridge import (MemoryBridge,
+                                        create_memory_bridge_if_available)
     from we_mma_2.skeleton_processor import SkeletonFrame, SkeletonProcessor
 
     from .config import config
@@ -62,9 +66,24 @@ class WE_MMA_Receiver_App:
         # 設定網路接收器回調
         self.network_receiver.on_connection_changed = self._on_connection_changed
         
+        # 初始化記憶層橋接（Home Agent Memory Layer）
+        self.memory_bridge: Optional[MemoryBridge] = create_memory_bridge_if_available()
+        if self.memory_bridge:
+            self.debug_log("Memory Layer bridge initialized")
+            # 將記憶層橋接器傳遞給 GUI
+            self.gui.memory_bridge = self.memory_bridge
+        else:
+            self.debug_log("Memory Layer not available, running without persistence")
+        
+        # 幀編號計數器（用於記憶層）
+        self.frame_counter: int = 0
+        
         # 動作識別更新計時器
         self.last_action_update: float = 0.0
         self.action_update_interval: float = 0.5
+        
+        # 更新 GUI 上的記憶層狀態
+        self._update_memory_status()
         
         self.debug_log("Application initialized")
     
@@ -72,6 +91,36 @@ class WE_MMA_Receiver_App:
         """除錯日誌"""
         if config.debug:
             print(f"[WE_MMA_Receiver][{time.time():.3f}] {msg}")
+    
+    def _update_memory_status(self):
+        """更新記憶層狀態顯示"""
+        if self.memory_bridge:
+            # 檢查資料庫連線狀態
+            is_db_connected = False
+            db_error = None
+            
+            if hasattr(self.memory_bridge, '_memory_layer') and self.memory_bridge._memory_layer:
+                is_db_connected = self.memory_bridge._memory_layer.is_db_connected
+                db_error = self.memory_bridge._memory_layer.db_error
+            
+            # 檢查執行緒是否在運行
+            is_running = (
+                hasattr(self.memory_bridge, '_memory_layer') and 
+                self.memory_bridge._memory_layer is not None and
+                self.memory_bridge._memory_layer.is_alive()
+            )
+            
+            events_sent = self.memory_bridge.events_sent
+            
+            self.gui.update_memory_status(
+                enabled=True, 
+                connected=is_db_connected and is_running, 
+                events_sent=events_sent,
+                db_type="PostgreSQL",
+                error=db_error
+            )
+        else:
+            self.gui.update_memory_status(enabled=False, connected=False)
     
     def _on_start(self) -> bool:
         """
@@ -83,7 +132,17 @@ class WE_MMA_Receiver_App:
         success = self.network_receiver.start()
         if success:
             self.skeleton_processor.clear()
+            self.frame_counter = 0
             self.action_recognizer.start()
+            # 啟動記憶層
+            if self.memory_bridge:
+                try:
+                    self.memory_bridge.start()
+                    self.debug_log("Memory Layer started")
+                except Exception as e:
+                    self.debug_log(f"Failed to start Memory Layer: {e}")
+            # 更新記憶層狀態顯示
+            self._update_memory_status()
             self.debug_log("Started receiving")
         return success
     
@@ -92,6 +151,12 @@ class WE_MMA_Receiver_App:
         self.network_receiver.stop()
         self.action_recognizer.stop()
         self.skeleton_processor.clear()
+        # 停止記憶層
+        if self.memory_bridge:
+            self.memory_bridge.stop()
+            self.debug_log("Memory Layer stopped")
+        # 更新記憶層狀態顯示
+        self._update_memory_status()
         self.debug_log("Stopped receiving")
     
     def _on_connection_changed(self, connected: bool):
@@ -121,9 +186,17 @@ class WE_MMA_Receiver_App:
         Args:
             frame_data: 接收到的幀資料
         """
+        # 增加幀計數器
+        self.frame_counter += 1
+        
         # 處理骨架資料
         skeleton_frame = self.skeleton_processor.process_frame(frame_data)
         
+        # === 發送感知資料到記憶層 (每一幀) ===
+        # 注意：這裡在背景執行緒執行，避免阻塞 GUI
+        if self.memory_bridge:
+            self._send_to_memory_layer()
+            
         # 排程 GUI 更新（必須在主執行緒）
         self.root.after(0, self._update_gui, frame_data, skeleton_frame)
         
@@ -163,14 +236,92 @@ class WE_MMA_Receiver_App:
         except Exception as e:
             self.debug_log(f"GUI update error: {e}")
     
+    def _send_to_memory_layer(self):
+        """發送感知資料到記憶層（每一幀呼叫）"""
+        try:
+            # 只處理當前幀偵測到的人（從最新的插值幀獲取）
+            if not self.skeleton_processor.interpolated_buffer:
+                return
+            
+            latest_frame = self.skeleton_processor.interpolated_buffer[-1]
+            
+            if not latest_frame.persons:
+                # 本幀沒有偵測到任何人，不發送任何資料
+                # 記憶層會根據「收不到某人的資料」來判斷該人不在場
+                return
+            
+            # 除錯：輸出本幀偵測到的人數
+            if self.frame_counter % 30 == 0:
+                person_ids = [p.person_id for p in latest_frame.persons]
+                self.debug_log(f"Frame {self.frame_counter}: {len(person_ids)} persons detected: {person_ids}")
+            
+            # 處理本幀偵測到的每個人
+            for person in latest_frame.persons:
+                person_id = person.person_id
+                
+                # 1. 獲取動作識別結果 (可能為 None)
+                result = self.action_recognizer.get_current_result(person_id)
+                
+                # 2. 獲取運動強度
+                motion = self.skeleton_processor.get_motion_magnitude(person_id)
+                
+                # 3. 邊界框與 ReID 向量（直接從 person 物件獲取）
+                bbox = person.box  # 這是 (x, y, w, h) tuple
+                reid_vector = person.reid_vector
+                
+                # 4. 匹配成員
+                matched_member_id = None
+                if reid_vector is not None and self.memory_bridge:
+                    # 使用較嚴格的閾值 (0.3) 確保只有信心度夠高才匹配
+                    match = self.memory_bridge.find_nearest_member(reid_vector, threshold=0.3)
+                    if match:
+                        matched_member_id = match['member_id']
+                
+                # 5. 準備動作標籤與置信度
+                action_label = "偵測中"
+                action_confidence = 0.0
+                action_candidates = []
+                action_duration = 0.0
+                
+                if result:
+                    action_label = result.simplified_label or result.action_label
+                    action_confidence = result.confidence
+                    action_candidates = result.top_k_actions if result.top_k_actions else []
+                    action_duration = result.duration
+                
+                # 6. 發送到記憶層
+                self.memory_bridge.send_action_result(
+                    person_id=person_id,
+                    frame_no=self.frame_counter,
+                    bbox=bbox,
+                    action_label=action_label,
+                    action_confidence=action_confidence,
+                    action_candidates=action_candidates,
+                    action_duration=action_duration,
+                    motion_magnitude=motion,
+                    reid_vector=reid_vector,
+                    matched_member_id=matched_member_id,
+                    environment={"room": config.room_name}
+                )
+                
+        except Exception as e:
+            self.debug_log(f"Memory bridge error: {e}")
+    
     def _update_action_display(self):
         """更新動作識別結果顯示（直觀風格）"""
         try:
-            # 獲取所有人的識別結果
-            all_results = {}
-            person_ids = list(self.skeleton_processor.person_tracker.keys())
+            # 只從最新的插值幀獲取當前偵測到的人
+            if not self.skeleton_processor.interpolated_buffer:
+                self.gui.update_action_result(
+                    action="等待偵測...",
+                    confidence=0.0,
+                    skeleton_status="無人偵測到"
+                )
+                return
             
-            if not person_ids:
+            latest_frame = self.skeleton_processor.interpolated_buffer[-1]
+            
+            if not latest_frame.persons:
                 self.gui.update_action_result(
                     action="等待偵測...",
                     confidence=0.0,
@@ -185,7 +336,9 @@ class WE_MMA_Receiver_App:
             main_skeleton_status = "等待偵測..."
             main_motion_status = "-"
             
-            for person_id in person_ids:
+            # 處理當前幀偵測到的人物
+            for person in latest_frame.persons:
+                person_id = person.person_id
                 result = self.action_recognizer.get_current_result(person_id)
                 
                 # 骨架可見性分析
@@ -214,17 +367,19 @@ class WE_MMA_Receiver_App:
                     'top5': result.top_k_actions if result else [],
                     'skeleton_status': skel_status,
                     'motion_status': motion_text,
-                    'reid_name': '-'  # 可以從 ReID 結果中獲取
+                    'reid_name': '-',
+                    'bbox': person.box  # 加入邊界框資訊
                 }
                 multi_person_info.append(person_info)
-                
-                # 使用第一個人的結果作為主顯示
-                if person_id == 0 or (person_id == min(person_ids)):
-                    main_action = person_info['action']
-                    main_confidence = person_info['confidence']
-                    main_top5 = person_info['top5']
-                    main_skeleton_status = skel_status
-                    main_motion_status = motion_text
+            
+            # 使用第一個人的結果作為主顯示
+            if multi_person_info:
+                first_person = multi_person_info[0]
+                main_action = first_person['action']
+                main_confidence = first_person['confidence']
+                main_top5 = first_person['top5']
+                main_skeleton_status = first_person['skeleton_status']
+                main_motion_status = first_person['motion_status']
             
             # 更新 GUI
             self.gui.update_action_result(
@@ -286,13 +441,17 @@ class WE_MMA_Receiver_App:
     def _schedule_connection_check(self):
         """定期檢查並更新連線狀態"""
         try:
-            # 檢查連線狀態是否有變化
+            # 檢查網路連線狀態是否有變化
             if self.network_receiver.check_connection_state():
                 status_info = self.network_receiver.get_connection_status()
                 self.gui.update_connection_status(
                     self.network_receiver.is_connected, 
                     status_info
                 )
+            
+            # 更新記憶層狀態（顯示已發送事件數）
+            self._update_memory_status()
+            
         except Exception as e:
             pass
         
@@ -304,6 +463,8 @@ class WE_MMA_Receiver_App:
         self.debug_log("Cleaning up...")
         self.network_receiver.stop()
         self.action_recognizer.stop()
+        if self.memory_bridge:
+            self.memory_bridge.stop()
 
 
 def main():
@@ -316,7 +477,21 @@ def main():
     print()
     
     app = WE_MMA_Receiver_App()
-    app.run()
+    
+    try:
+        app.run()
+    except KeyboardInterrupt:
+        print("\n[WE_MMA_Receiver] 收到中斷信號，正在關閉...")
+        app._cleanup()
+        try:
+            app.root.destroy()
+        except:
+            pass
+        sys.exit(0)
+    except Exception as e:
+        print(f"\n[WE_MMA_Receiver] 發生未預期的錯誤: {e}")
+        app._cleanup()
+        sys.exit(1)
 
 
 if __name__ == "__main__":

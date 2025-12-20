@@ -36,6 +36,7 @@ class ReceiverConfig:
     network: NetworkConfig = None
     gui: ReceiverGUIConfig = None
     debug: bool = True
+    room_name: str = "Living Room"  # 預設房間名稱
     
     def __post_init__(self):
         if self.network is None:

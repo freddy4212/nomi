@@ -15,6 +15,7 @@ import os
 import sys
 import time
 import tkinter as tk
+from datetime import datetime
 from tkinter import messagebox, ttk
 from typing import Any, Callable, Dict, List, Optional
 
@@ -26,7 +27,6 @@ from PIL import Image, ImageTk
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from we_mma_2.config import config as mma_config
-from we_mma_2.reid_database import get_reid_database
 from we_mma_2.skeleton_processor import SkeletonFrame
 from we_mma_2.visualizer import SkeletonPlayer, Visualizer
 
@@ -74,8 +74,8 @@ class ReceiverGUIInterface:
         self.current_reid_data = []
         self.last_reid_update = 0.0
         
-        # ReID 資料庫
-        self.reid_db = get_reid_database()
+        # ReID 資料庫 (已棄用 SQLite，改用 memory_bridge)
+        self.memory_bridge = None
         
         # 錄製狀態
         self.is_recording = False
@@ -145,7 +145,18 @@ class ReceiverGUIInterface:
             variable=self.view_mode, value="interpolated"
         ).pack(side=tk.LEFT, padx=8)
         
-        # 狀態指示燈
+        # 記憶層狀態指示燈（在右側）
+        self.memory_status_label = ttk.Label(
+            top_frame, 
+            text="🗄 記憶層: --", 
+            foreground="gray"
+        )
+        self.memory_status_label.pack(side=tk.RIGHT, padx=5)
+        
+        # 分隔線
+        ttk.Separator(top_frame, orient=tk.VERTICAL).pack(side=tk.RIGHT, fill=tk.Y, padx=5)
+        
+        # 網路連線狀態指示燈
         self.status_label = ttk.Label(top_frame, text="● 已停止", foreground="gray")
         self.status_label.pack(side=tk.RIGHT, padx=10)
     
@@ -163,6 +174,9 @@ class ReceiverGUIInterface:
         self.tab_register = ttk.Frame(self.notebook)
         self.notebook.add(self.tab_register, text="📝 向量錄入")
         self._setup_register_tab()
+        
+        # 綁定分頁切換事件：切換到向量錄入時自動刷新已註冊人物列表
+        self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
     
     def _setup_live_tab(self):
         """建立即時辨識分頁"""
@@ -491,7 +505,8 @@ class ReceiverGUIInterface:
             if norm > 0:
                 avg_vector = avg_vector / norm
             
-            self.reid_db.add_person(self.recording_name, avg_vector)
+            if self.memory_bridge:
+                self.memory_bridge.register_member(self.recording_name, avg_vector)
             
             self.lbl_record_status.config(
                 text=f"狀態：錄製完成 ✓", 
@@ -544,20 +559,24 @@ class ReceiverGUIInterface:
         for item in self.tree_persons.get_children():
             self.tree_persons.delete(item)
         
-        persons = self.reid_db.get_all_persons()
+        if not self.memory_bridge:
+            return
+            
+        members = self.memory_bridge.get_all_members()
         
-        for person in persons:
-            updated_str = time.strftime(
-                "%Y-%m-%d %H:%M", 
-                time.localtime(person.updated_at)
-            )
+        for member in members:
+            updated_at = member.get('updated_at')
+            if isinstance(updated_at, datetime):
+                updated_str = updated_at.strftime("%Y-%m-%d %H:%M")
+            else:
+                updated_str = "-"
             
             self.tree_persons.insert(
                 "", "end",
-                values=(person.name, person.sample_count, updated_str)
+                values=(member['name'], member.get('sample_count', 1), updated_str)
             )
         
-        self.lbl_person_count.config(text=f"共 {len(persons)} 人已註冊")
+        self.lbl_person_count.config(text=f"共 {len(members)} 人已註冊")
     
     def _on_delete_person(self):
         """刪除選中的人物"""
@@ -570,16 +589,25 @@ class ReceiverGUIInterface:
         name = item['values'][0]
         
         if messagebox.askyesno("確認刪除", f"確定要刪除 {name} 嗎？"):
-            self.reid_db.delete_person(name)
+            if self.memory_bridge:
+                self.memory_bridge.delete_member(name)
             self._refresh_persons_list()
     
     def _on_delete_all(self):
         """刪除所有人物"""
         if messagebox.askyesno("確認刪除", "確定要刪除所有已註冊的人物嗎？\n此操作無法復原！"):
-            self.reid_db.delete_all()
+            if self.memory_bridge:
+                self.memory_bridge.delete_all_members()
             self._refresh_persons_list()
     
     # ===== 事件處理 =====
+    
+    def _on_tab_changed(self, event):
+        """分頁切換事件：切換到向量錄入分頁時自動刷新已註冊人物列表"""
+        selected_tab = self.notebook.index(self.notebook.select())
+        # 分頁索引 1 = 向量錄入分頁
+        if selected_tab == 1:
+            self._refresh_persons_list()
     
     def _on_canvas_resize(self, event):
         """畫布尺寸變更"""
@@ -645,6 +673,40 @@ class ReceiverGUIInterface:
             else:
                 self.status_label.config(text="● 等待連線", foreground="orange")
                 self.lbl_conn_status.config(text="Status: 等待連線...", foreground="orange")
+    
+    def update_memory_status(self, enabled: bool, connected: bool, events_sent: int = 0, db_type: str = "PostgreSQL", error: str = None):
+        """
+        更新記憶層連線狀態
+        
+        Args:
+            enabled: 記憶層模組是否可用
+            connected: 資料庫是否已連線
+            events_sent: 已發送的事件數
+            db_type: 資料庫類型
+            error: 連線錯誤訊息
+        """
+        if not enabled:
+            self.memory_status_label.config(
+                text="🗄 記憶層: 未安裝", 
+                foreground="gray"
+            )
+        elif connected:
+            self.memory_status_label.config(
+                text=f"🗄 {db_type} ✓ ({events_sent})", 
+                foreground="green"
+            )
+        elif error:
+            # 連線失敗
+            short_error = error[:20] + "..." if len(error) > 20 else error
+            self.memory_status_label.config(
+                text=f"🗄 {db_type}: ✗ 未連線", 
+                foreground="red"
+            )
+        else:
+            self.memory_status_label.config(
+                text=f"🗄 {db_type}: 待機", 
+                foreground="orange"
+            )
     
     # ===== 公開方法 =====
     
@@ -762,42 +824,71 @@ class ReceiverGUIInterface:
         
         self.current_reid_data = reid_results
         
-        valid_ids = set()
-        if skeleton_frame:
-            for p in skeleton_frame.persons:
-                valid_ids.add(p.person_id)
-        
-        limit = min(len(reid_results), 20)
-        for i in range(limit):
-            if skeleton_frame is not None and i not in valid_ids:
-                continue
-            
-            vector = reid_results[i] if i < len(reid_results) else None
-            
-            who = ""
-            score = ""
-            if vector is not None and isinstance(vector, (list, np.ndarray)):
-                try:
-                    vec_np = np.array(vector, dtype=np.float32)
-                    name, sim_score = self.reid_db.identify(vec_np)
-                    if name:
-                        who = name
-                        score = f"{sim_score:.2f}"
-                except Exception:
-                    pass
-            
-            self.tree.insert(
-                "", "end", 
-                iid=str(i), 
-                values=(f"Person {i}", who, score)
-            )
-            
-            if self.is_recording and vector is not None:
-                try:
-                    vec_np = np.array(vector, dtype=np.float32)
-                    self.add_recording_vector(vec_np)
-                except Exception:
-                    pass
+        # 如果有骨架幀，直接使用每個人物的 reid_vector
+        if skeleton_frame and skeleton_frame.persons:
+            for person in skeleton_frame.persons:
+                person_id = person.person_id
+                vector = person.reid_vector
+                
+                who = ""
+                score = ""
+                if vector is not None and isinstance(vector, (list, np.ndarray)):
+                    try:
+                        vec_np = np.array(vector, dtype=np.float32)
+                        if self.memory_bridge:
+                            # 使用記憶層進行識別 (餘弦距離閾值 0.4 對應相似度 0.6)
+                            result = self.memory_bridge.find_nearest_member(vec_np, threshold=0.4)
+                            if result:
+                                who = result['name']
+                                sim_score = 1.0 - result['distance']
+                                score = f"{sim_score:.2f}"
+                    except Exception:
+                        pass
+                
+                self.tree.insert(
+                    "", "end", 
+                    iid=str(person_id), 
+                    values=(f"Person {person_id}", who, score)
+                )
+                
+                if self.is_recording and vector is not None:
+                    try:
+                        vec_np = np.array(vector, dtype=np.float32)
+                        self.add_recording_vector(vec_np)
+                    except Exception:
+                        pass
+        else:
+            # 後備方案：沒有骨架幀時使用索引遍歷 reid_results
+            limit = min(len(reid_results), 20)
+            for i in range(limit):
+                vector = reid_results[i] if i < len(reid_results) else None
+                
+                who = ""
+                score = ""
+                if vector is not None and isinstance(vector, (list, np.ndarray)):
+                    try:
+                        vec_np = np.array(vector, dtype=np.float32)
+                        if self.memory_bridge:
+                            result = self.memory_bridge.find_nearest_member(vec_np, threshold=0.4)
+                            if result:
+                                who = result['name']
+                                sim_score = 1.0 - result['distance']
+                                score = f"{sim_score:.2f}"
+                    except Exception:
+                        pass
+                
+                self.tree.insert(
+                    "", "end", 
+                    iid=str(i), 
+                    values=(f"Person {i}", who, score)
+                )
+                
+                if self.is_recording and vector is not None:
+                    try:
+                        vec_np = np.array(vector, dtype=np.float32)
+                        self.add_recording_vector(vec_np)
+                    except Exception:
+                        pass
     
     def update_interpolation_status(self, status: Dict[str, Any]):
         """更新補幀狀態顯示"""
