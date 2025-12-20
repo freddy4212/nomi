@@ -25,3 +25,4 @@ EPII_CM55M_APP_S/prebuilt_libs/**
 # Temp
 *.pyc
 .pio
+.pycache

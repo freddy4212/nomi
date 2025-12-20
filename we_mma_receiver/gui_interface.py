@@ -23,15 +23,13 @@ import cv2
 import numpy as np
 from PIL import Image, ImageTk
 
-# 確保可以導入 we_mma_2 的模組
+# 確保可以導入模組
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from we_mma_2.config import config as mma_config
-from we_mma_2.skeleton_processor import SkeletonFrame
-from we_mma_2.visualizer import SkeletonPlayer, Visualizer
-
-from .config import config
-from .network_receiver import FrameData
+from we_mma_receiver.config import config
+from we_mma_receiver.modules.network.receiver import FrameData
+from we_mma_receiver.modules.skeleton.processor import SkeletonFrame
+from we_mma_receiver.modules.visualization import SkeletonPlayer, Visualizer
 
 
 class ReceiverGUIInterface:

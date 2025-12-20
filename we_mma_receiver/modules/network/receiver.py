@@ -20,7 +20,10 @@ from typing import Any, Callable, Dict, List, Optional
 import cv2
 import numpy as np
 
-from .config import config
+try:
+    from ...config import config
+except ImportError:
+    from we_mma_receiver.config import config
 
 
 @dataclass

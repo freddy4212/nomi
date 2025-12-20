@@ -15,6 +15,16 @@ main.py - WE_MMA_Receiver 主程式入口
 
 import os
 import sys
+
+# 設定統一的 __pycache__ 路徑，避免散落在各個模組資料夾中
+# 這需要在導入任何自定義模組之前設定
+if __name__ == "__main__" or __package__ is None:
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    pycache_dir = os.path.join(base_dir, ".pycache")
+    if not os.path.exists(pycache_dir):
+        os.makedirs(pycache_dir, exist_ok=True)
+    sys.pycache_prefix = pycache_dir
+
 import threading
 import time
 import tkinter as tk
@@ -22,23 +32,30 @@ from typing import Optional
 
 # 處理直接執行和作為模組執行的情況
 if __name__ == "__main__" or __package__ is None:
+    # 添加專案根目錄到 path
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from we_mma_2.action_recognizer import ActionRecognizerAsync
-    from we_mma_2.memory_bridge import (MemoryBridge,
-                                        create_memory_bridge_if_available)
-    from we_mma_2.skeleton_processor import SkeletonFrame, SkeletonProcessor
+    # 添加 mmaction2 submodule 到 path
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'mmaction2'))
+    
     from we_mma_receiver.config import config
     from we_mma_receiver.gui_interface import ReceiverGUIInterface
-    from we_mma_receiver.network_receiver import FrameData, NetworkReceiver
+    from we_mma_receiver.modules.action.recognizer import ActionRecognizerAsync
+    from we_mma_receiver.modules.memory import (
+        MemoryBridge, create_memory_bridge_if_available)
+    from we_mma_receiver.modules.network.receiver import (FrameData,
+                                                          NetworkReceiver)
+    from we_mma_receiver.modules.skeleton.processor import (SkeletonFrame,
+                                                            SkeletonProcessor)
 else:
-    from we_mma_2.action_recognizer import ActionRecognizerAsync
-    from we_mma_2.memory_bridge import (MemoryBridge,
-                                        create_memory_bridge_if_available)
-    from we_mma_2.skeleton_processor import SkeletonFrame, SkeletonProcessor
+    # 添加 mmaction2 submodule 到 path (當作為模組導入時)
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'mmaction2'))
 
     from .config import config
     from .gui_interface import ReceiverGUIInterface
-    from .network_receiver import FrameData, NetworkReceiver
+    from .modules.action.recognizer import ActionRecognizerAsync
+    from .modules.memory import MemoryBridge, create_memory_bridge_if_available
+    from .modules.network.receiver import FrameData, NetworkReceiver
+    from .modules.skeleton.processor import SkeletonFrame, SkeletonProcessor
 
 
 class WE_MMA_Receiver_App:
@@ -404,10 +421,21 @@ class WE_MMA_Receiver_App:
                 for person_id, sequence in sequences.items():
                     motion = self.skeleton_processor.get_motion_magnitude(person_id)
                     visibility = self.skeleton_processor.analyze_visibility(person_id)
+                    
+                    # 獲取最新的邊界框資訊（用於 aspect_ratio 計算）
+                    bbox = None
+                    if self.skeleton_processor.interpolated_buffer:
+                        latest_frame = self.skeleton_processor.interpolated_buffer[-1]
+                        for p in latest_frame.persons:
+                            if p.person_id == person_id:
+                                bbox = p.box
+                                break
+                    
                     sequences_info[person_id] = {
                         'sequence': sequence,
                         'motion': motion,
-                        'visibility': visibility
+                        'visibility': visibility,
+                        'bbox': bbox
                     }
                 
                 self.debug_log(f"Submitting {len(sequences)} sequence(s) for recognition")

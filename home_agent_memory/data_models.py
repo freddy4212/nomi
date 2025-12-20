@@ -19,7 +19,8 @@ class ActionCandidate:
     confidence: float   # 信心度 (0.0 ~ 1.0)
     
     def to_dict(self) -> Dict[str, Any]:
-        return {"label": self.label, "confidence": self.confidence}
+        # 確保 confidence 是 Python 原生 float（避免 numpy float32 無法 JSON 序列化）
+        return {"label": self.label, "confidence": float(self.confidence)}
 
 
 @dataclass

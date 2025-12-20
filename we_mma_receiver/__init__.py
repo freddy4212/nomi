@@ -10,7 +10,7 @@ we_mma_receiver - WE_MMA_2 接收端程式
 改用 localhost socket 接收資料。
 """
 
-from .main import WE_MMA_Receiver_App, main
-from .network_receiver import NetworkReceiver
+from .main import WE_MMA_Receiver_App
+from .modules.network.receiver import NetworkReceiver
 
-__all__ = ['main', 'WE_MMA_Receiver_App', 'NetworkReceiver']
+__all__ = ['WE_MMA_Receiver_App', 'NetworkReceiver']
