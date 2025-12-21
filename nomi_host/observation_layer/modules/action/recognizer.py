@@ -15,7 +15,7 @@ recognizer.py - MMAction2 動作識別模組
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -44,7 +44,7 @@ class ActionResult:
 
 class TemporalFilter:
     """使用滑動窗口投票機制穩定識別結果"""
-    def __init__(self, window_size: int = 5, min_confidence: float = 0.3):
+    def __init__(self, window_size: int = 2, min_confidence: float = 0.3):
         self.window_size = window_size
         self.min_confidence = min_confidence
         self.history = deque(maxlen=window_size)
@@ -557,7 +557,7 @@ class ActionRecognizer:
 class ActionRecognizerAsync:
     """異步動作識別器"""
     
-    def __init__(self):
+    def __init__(self, on_result: Optional[Callable[[Dict[int, ActionResult]], None]] = None):
         """初始化異步識別器"""
         self.recognizer = ActionRecognizer()
         self.recognition_thread: Optional[threading.Thread] = None
@@ -565,6 +565,7 @@ class ActionRecognizerAsync:
         self.input_queue = threading.Condition()
         self.latest_sequences_info: Optional[Dict[int, Dict[str, Any]]] = None
         self.latest_results: Dict[int, ActionResult] = {}
+        self.on_result = on_result
         self.running = False
         
     def start(self):
@@ -608,6 +609,14 @@ class ActionRecognizerAsync:
                 results = self.recognizer.recognize_all(sequences_info)
                 
                 self.latest_results = results
+                
+                # 觸發回調
+                if self.on_result:
+                    try:
+                        self.on_result(results)
+                    except Exception as e:
+                        if config.debug:
+                            print(f"[ActionRecognizerAsync] Callback error: {e}")
                 
                 if config.debug:
                     print(f"[ActionRecognizerAsync] Got {len(results)} result(s)")

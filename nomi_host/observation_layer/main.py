@@ -57,6 +57,8 @@ else:
     from .core import PersonActionInfo, ReceiverCore, ReceiverStatus
 
 
+
+
 class NOMIObservationLayerApp:
     """
     NOMI Observation Layer GUI 應用程式類
@@ -74,11 +76,16 @@ class NOMIObservationLayerApp:
         else:
             from .gui_interface import ReceiverGUIInterface
         
+
+
         # 建立 Tkinter 根視窗
         self.root = tk.Tk()
         
         # 初始化 GUI
         self.gui = ReceiverGUIInterface(self.root)
+        
+        # 快取最新的動作識別結果
+        self.latest_actions = []
         
         # 初始化核心（設定回調）
         self.core = ReceiverCore(
@@ -152,9 +159,12 @@ class NOMIObservationLayerApp:
         """幀處理完成回調"""
         # 排程到主執行緒更新 GUI
         self.root.after(0, self._update_gui_frame, frame_data, skeleton_frame)
+        
+
     
     def _on_action_recognized(self, actions):
         """動作識別結果回調"""
+        self.latest_actions = actions
         self.root.after(0, self._update_gui_actions, actions)
     
     def _on_status_changed(self, status: ReceiverStatus):

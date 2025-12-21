@@ -147,6 +147,8 @@ class NetworkReceiver:
             self.socket.connect((self.host, self.port))
             self.socket.settimeout(0.1)  # 設定非阻塞式讀取超時
             self.is_connected = True
+            self.fps_start_time = time.time()
+            self.frame_count = 0
             self.debug_log(f"Connected to {self.host}:{self.port}")
             
             if self.on_connection_changed:
@@ -250,6 +252,8 @@ class NetworkReceiver:
                     self.is_connected = True
                     self._connection_state_changed = True
                     self.last_connection_time = time.time()
+                    self.fps_start_time = time.time()
+                    self.frame_count = 0
                     byte_buffer = b""
                     self.debug_log(f"Client connected from {addr}")
                     
@@ -375,7 +379,11 @@ class NetworkReceiver:
             # 支援新舊格式
             inner_data = data
             if data.get("name") == "INVOKE" and "data" in data:
-                inner_data = data["data"]
+                inner_data = data["data"].copy()
+                # 將外層的其他資訊也併入，以免遺失 Model 等資訊
+                for k, v in data.items():
+                    if k not in ["data", "name"] and k not in inner_data:
+                        inner_data[k] = v
             
             # 解析影像（如果有）
             image = None
@@ -391,9 +399,15 @@ class NetworkReceiver:
             # 建構 FrameData
             frame_info = inner_data.get("frame_info", {})
             
+            # 確保數值型態正確
+            try:
+                f_no = int(frame_info.get("frame_no", inner_data.get("frame_no", 0)))
+            except:
+                f_no = 0
+                
             frame_data = FrameData(
                 timestamp=time.time(),
-                frame_no=frame_info.get("frame_no", inner_data.get("frame_no", 0)),
+                frame_no=f_no,
                 image=image,
                 keypoints=inner_data.get("keypoints", []),
                 reid_results=inner_data.get("reid_results", []),
@@ -425,6 +439,9 @@ class NetworkReceiver:
     
     def get_fps(self) -> float:
         """獲取當前 FPS"""
+        # 如果超過 2 秒沒收到資料，FPS 歸零
+        if self.last_data_time > 0 and (time.time() - self.last_data_time > 2.0):
+            self.current_fps = 0.0
         return self.current_fps
     
     def get_connection_info(self) -> str:

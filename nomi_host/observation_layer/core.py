@@ -36,13 +36,13 @@ if os.path.join(_base_dir, 'mmaction2') not in sys.path:
 
 try:
     from .config import config
-    from .modules.action.recognizer import ActionRecognizerAsync
+    from .modules.action.recognizer import ActionRecognizerAsync, ActionResult
     from .modules.memory import MemoryBridge, create_memory_bridge_if_available
     from .modules.network.receiver import FrameData, NetworkReceiver
     from .modules.skeleton.processor import SkeletonFrame, SkeletonProcessor
 except ImportError:
     from config import config
-    from modules.action.recognizer import ActionRecognizerAsync
+    from modules.action.recognizer import ActionRecognizerAsync, ActionResult
     from modules.memory import MemoryBridge, create_memory_bridge_if_available
     from modules.network.receiver import FrameData, NetworkReceiver
     from modules.skeleton.processor import SkeletonFrame, SkeletonProcessor
@@ -112,7 +112,7 @@ class ReceiverCore(threading.Thread):
         # 核心模組
         self.network_receiver = NetworkReceiver(on_frame_received=self._on_frame_received)
         self.skeleton_processor = SkeletonProcessor()
-        self.action_recognizer = ActionRecognizerAsync()
+        self.action_recognizer = ActionRecognizerAsync(on_result=self._on_action_result_ready)
         
         # 記憶層橋接
         self.memory_bridge: Optional[MemoryBridge] = None
@@ -132,11 +132,7 @@ class ReceiverCore(threading.Thread):
         
         # 動作識別更新計時器
         self._last_action_update: float = 0.0
-        self._action_update_interval: float = 0.5
-        
-        # FPS 計算
-        self._fps_counter: int = 0
-        self._fps_last_time: float = time.time()
+        self._action_update_interval: float = 0.1 # 提高到 10 FPS
         
         self.debug_log("ReceiverCore initialized")
     
@@ -201,6 +197,13 @@ class ReceiverCore(threading.Thread):
             else:
                 motion_text = f"{motion:.1f} (移動)"
             
+            # ReID 識別
+            reid_name = None
+            if person.reid_vector is not None and self.memory_bridge:
+                match = self.memory_bridge.find_nearest_member(person.reid_vector, threshold=0.3)
+                if match:
+                    reid_name = match.get('name')
+            
             info = PersonActionInfo(
                 person_id=person_id,
                 action_label=result.action_label if result else "等待識別",
@@ -209,6 +212,7 @@ class ReceiverCore(threading.Thread):
                 skeleton_status=skel_status,
                 motion_status=motion_text,
                 bbox=person.box,
+                reid_name=reid_name
             )
             results.append(info)
         
@@ -344,7 +348,6 @@ class ReceiverCore(threading.Thread):
     def _on_frame_received(self, frame_data: FrameData):
         """幀資料接收回調（在背景執行緒中調用）"""
         self._frame_counter += 1
-        self._fps_counter += 1
         
         with self._status_lock:
             self._status.frame_count = self._frame_counter
@@ -357,10 +360,6 @@ class ReceiverCore(threading.Thread):
             with self._status_lock:
                 self._status.persons_detected = len(skeleton_frame.persons)
         
-        # 發送到記憶層
-        if self.memory_bridge:
-            self._send_to_memory_layer()
-        
         # 通知回調
         if self.on_frame_processed:
             self.on_frame_processed(frame_data, skeleton_frame)
@@ -369,11 +368,17 @@ class ReceiverCore(threading.Thread):
         if time.time() - self._last_action_update >= self._action_update_interval:
             self._try_action_recognition()
             self._last_action_update = time.time()
-            
-            # 通知動作識別結果
-            if self.on_action_recognized:
-                actions = self.get_current_actions()
-                self.on_action_recognized(actions)
+    
+    def _on_action_result_ready(self, results: Dict[int, ActionResult]):
+        """當動作識別結果準備好時的回調"""
+        # 通知回調
+        if self.on_action_recognized:
+            actions = self.get_current_actions()
+            self.on_action_recognized(actions)
+        
+        # 立即發送到記憶層
+        if self.memory_bridge:
+            self._send_to_memory_layer()
     
     def _on_network_connection_changed(self, connected: bool):
         """網路連接狀態變更回調"""
@@ -389,14 +394,14 @@ class ReceiverCore(threading.Thread):
     
     def _update_fps(self):
         """更新 FPS 計算"""
-        current_time = time.time()
-        elapsed = current_time - self._fps_last_time
+        fps = self.network_receiver.get_fps()
         
-        if elapsed >= 1.0:
-            with self._status_lock:
-                self._status.fps = self._fps_counter / elapsed
-            self._fps_counter = 0
-            self._fps_last_time = current_time
+        with self._status_lock:
+            self._status.fps = fps
+            self._status.frame_count = self._frame_counter
+            
+        # 通知狀態變化，確保前端能收到最新的 FPS 和 frame_count
+        self._notify_status_change()
     
     def _notify_status_change(self):
         """通知狀態變化"""

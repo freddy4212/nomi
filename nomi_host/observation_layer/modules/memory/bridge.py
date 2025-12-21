@@ -33,9 +33,8 @@ _MEMORY_AVAILABLE = False
 
 try:
     from memory_layer.data_models import (ActionCandidate, BoundingBox,
-                                               EnvironmentData)
-    from memory_layer.data_models import \
-        PerceptionEvent as _PerceptionEvent
+                                          EnvironmentData)
+    from memory_layer.data_models import PerceptionEvent as _PerceptionEvent
     from memory_layer.data_models import create_perception_event
     _MEMORY_AVAILABLE = True
 except ImportError:
@@ -120,12 +119,12 @@ class MemoryBridge:
         # 過濾短暫出現的異常人物 (Debouncing)
         self.pending_persons: Dict[int, Dict[str, Any]] = {}
         self.verified_persons: set[int] = set()
-        self.min_duration_threshold = 1.0  # 至少持續出現 1.0 秒才寫入記憶層
+        self.min_duration_threshold = 0.1  # 降低到 0.1 秒，讓新人物幾乎立即出現
         self.last_cleanup_time = time.time()
         
         # 動作穩定性緩衝 (Action Stability)
         self.action_buffer: Dict[int, List[Any]] = {}
-        self.action_delay = 1.0  # 動作確認延遲時間 (秒)
+        self.action_delay = 0.0  # 降低到 0.0 秒，完全取消動作確認的延遲，實現即時發送
         
         self.debug_log(f"MemoryBridge initialized (enabled={self._enabled})")
     
@@ -406,9 +405,7 @@ class MemoryBridge:
             
             self.memory_queue.put_nowait(event)
             self._events_sent += 1
-            
-            if self._events_sent % 10 == 0:
-                self.debug_log(f"Events sent: {self._events_sent}, queue size: {self.memory_queue.qsize()}")
+            self.debug_log(f"Event sent to queue: person={event.person_id}, action={event.action_label}, total={self._events_sent}")
             
         except Exception as e:
             self.debug_log(f"Queue send error: {e}")
