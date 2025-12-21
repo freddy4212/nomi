@@ -82,7 +82,8 @@ class MemoryCore:
         
         # 建立記憶層實例
         self._memory_layer = MemoryLayer(
-            on_state_change=self._on_member_state_changed
+            on_state_change=self._on_member_state_changed,
+            on_event_processed=self.on_event_received
         )
         
         # 資料庫管理器（用於直接查詢）
@@ -180,6 +181,10 @@ class MemoryCore:
         """取得所有已註冊成員"""
         return self._db.get_registered_members()
     
+    def clear_all_events(self) -> bool:
+        """清除所有事件記憶"""
+        return self._db.clear_all_data()
+    
     # ==================== 生命週期管理 ====================
     
     def start(self):
@@ -187,6 +192,14 @@ class MemoryCore:
         if self._memory_layer.is_alive():
             self.debug_log("MemoryLayer already running")
             return
+        
+        # 如果執行緒已經啟動過（ident 不為 None），則需要重新建立實例
+        if self._memory_layer.ident is not None:
+            self.debug_log("Recreating MemoryLayer instance...")
+            self._memory_layer = MemoryLayer(
+                on_state_change=self._on_member_state_changed,
+                on_event_processed=self.on_event_received
+            )
         
         self.debug_log("Starting MemoryLayer...")
         self._memory_layer.start()

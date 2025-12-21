@@ -399,6 +399,24 @@ class DatabaseManager:
     
     # ==================== 查詢操作 ====================
     
+    def query(self, sql: str, params: Optional[Tuple] = None) -> List[Dict[str, Any]]:
+        """
+        執行自定義 SQL 查詢
+        
+        Args:
+            sql: SQL 語句
+            params: 參數元組
+            
+        Returns:
+            查詢結果列表
+        """
+        if not self._connected:
+            return []
+        
+        with self.get_cursor() as cursor:
+            cursor.execute(sql, params or ())
+            return cursor.fetchall()
+
     def get_person_history(
         self, 
         person_id: int, 
@@ -591,11 +609,18 @@ class DatabaseManager:
     def clear_all_data(self) -> bool:
         """清除所有資料 (保留成員註冊表)"""
         if not self._connected:
+            self.debug_log("Cannot clear data: Database not connected")
             return False
-        with self.get_cursor() as cursor:
-            # 清除遙測資料和狀態快照
-            cursor.execute('TRUNCATE TABLE unified_telemetry, member_state_snapshot CASCADE')
+        try:
+            self.debug_log("Executing TRUNCATE on unified_telemetry and member_state_snapshot...")
+            with self.get_cursor() as cursor:
+                # 清除遙測資料和狀態快照
+                cursor.execute('TRUNCATE TABLE unified_telemetry, member_state_snapshot CASCADE')
+            self.debug_log("Database cleared successfully")
             return True
+        except Exception as e:
+            self.debug_log(f"Clear all data error: {e}")
+            return False
 
     def get_all_members(self) -> List[Dict[str, Any]]:
         """取得所有已註冊成員"""

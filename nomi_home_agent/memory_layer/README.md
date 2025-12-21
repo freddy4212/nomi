@@ -18,7 +18,7 @@
 │      ↓          │  │      ↓        │  │  │ SQL 查詢能力        │   │
 │ device_simulator   │  │ PostgreSQL    │→ │  │ 自然語言推理        │   │
 │      ↓ (TCP)    │  │ + TimescaleDB │  │  │ 智慧助理回應        │   │
-│ observation_layer │→ │ + pgvector    │  │  └─────────────────────┘   │
+│ perception_layer │→ │ + pgvector    │  │  └─────────────────────┘   │
 │ (主要感知層)     │  │               │  │                             │
 │      ↓          │  └───────────────┘  │                             │
 │ memory_bridge   │                     │                             │
@@ -29,13 +29,13 @@
 
 | 模組 | 位置 | 說明 |
 |------|------|------|
-| **observation_layer** | `observation_layer/` | **主要感知層**，透過網路接收骨架資料 |
+| **perception_layer** | `perception_layer/` | **主要感知層**，透過網路接收骨架資料 |
 | **we_mma_2** | `we_mma_2/` | 核心框架，包含動作識別、骨架處理等核心功能 |
 | **device_simulator** | `device_simulator/` | 發送端，從攝影機/測試來源發送骨架資料 |
 | **memory_bridge** | `we_mma_2/memory_bridge.py` | 橋接模組，連接感知層與記憶層 |
 | **memory_layer** | `memory_layer/` | 記憶層核心，資料庫管理與持久化 |
 
-> **注意**：未來 `we_mma_2` 的核心功能將併入 `observation_layer`，簡化架構。
+> **注意**：未來 `we_mma_2` 的核心功能將併入 `perception_layer`，簡化架構。
 
 ## 資料流
 
@@ -307,7 +307,7 @@ memory_layer.stop()
 
 `we_mma_2/memory_bridge.py` 已經整合到以下感知層入口：
 
-- **`observation_layer/main.py`**（主要）- 網路接收模式
+- **`perception_layer/main.py`**（主要）- 網路接收模式
 - **`we_mma_2/main.py`** - 串口直連模式
 
 啟動 Receiver 時會自動連接記憶層。
@@ -315,7 +315,7 @@ memory_layer.stop()
 ```bash
 # 主要使用方式（網路接收）
 cd sscma-example-we2
-python -m observation_layer.main
+python -m perception_layer.main
 
 # 串口直連模式
 python -m we_mma_2.main
@@ -401,7 +401,7 @@ config = MemoryConfig(
 - [ ] **資料壓縮**：將歷史資料壓縮成摘要（例如「10:00-11:00 主要在客廳走動」）
 - [ ] **多攝影機融合**：支援多個 WiseEye2 設備的資料整合
 - [ ] **異常偵測**：偵測異常行為模式並自動標記
-- [ ] **合併 we_mma_2 核心功能到 observation_layer**：簡化架構
+- [ ] **合併 we_mma_2 核心功能到 perception_layer**：簡化架構
 
 ## 疑難排解
 

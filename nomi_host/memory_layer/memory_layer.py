@@ -35,6 +35,7 @@ class MemoryLayer(threading.Thread):
         input_queue: Optional[queue.Queue] = None,
         inference_queue: Optional[queue.Queue] = None,
         on_state_change: Optional[Callable[[MemberState], None]] = None,
+        on_event_processed: Optional[Callable[[PerceptionEvent], None]] = None,
     ):
         """
         初始化記憶層
@@ -43,6 +44,7 @@ class MemoryLayer(threading.Thread):
             input_queue: 來自感知層的輸入隊列，若未提供則自動建立
             inference_queue: 傳送給推論層的輸出隊列，若未提供則自動建立
             on_state_change: 狀態變化時的回調函數 (可選)
+            on_event_processed: 事件處理完成時的回調函數 (可選)
         """
         super().__init__(daemon=True, name="MemoryLayer")
         
@@ -60,6 +62,7 @@ class MemoryLayer(threading.Thread):
         # 當前狀態追蹤
         self.active_states: Dict[int, MemberState] = {}
         self._state_lock = threading.Lock()
+        self._last_state_sync: Dict[int, float] = {} # 用於節流 DB 更新
         
         # 批次寫入緩衝
         self._batch_buffer: List[PerceptionEvent] = []
@@ -68,6 +71,7 @@ class MemoryLayer(threading.Thread):
         
         # 回調
         self.on_state_change = on_state_change
+        self.on_event_processed = on_event_processed
         
         # 控制
         self._running = False
@@ -235,10 +239,18 @@ class MemoryLayer(threading.Thread):
         """
         self.debug_log(f"Processing event: person_id={event.person_id}, frame={event.frame_no}")
         
-        # 1. 更新成員狀態
+        # 1. 優先觸發回調 (即時通知前端，不被 DB 寫入阻塞)
+        if self.on_event_processed:
+            try:
+                self.debug_log(f"Triggering on_event_processed callback for person={event.person_id}")
+                self.on_event_processed(event)
+            except Exception as e:
+                self.debug_log(f"Error in on_event_processed callback: {e}")
+
+        # 2. 更新成員狀態 (含 DB 節流)
         self._update_member_state(event)
         
-        # 2. 加入批次緩衝
+        # 3. 加入批次緩衝
         with self._batch_lock:
             self._batch_buffer.append(event)
             self.debug_log(f"Batch buffer size: {len(self._batch_buffer)}, batch_size config: {memory_config.queue.batch_size}")
@@ -288,8 +300,15 @@ class MemoryLayer(threading.Thread):
                     except Exception as e:
                         self.debug_log(f"State change callback error: {e}")
             
-            # 同步更新到資料庫快照表
-            self.db.update_member_state(state)
+            # 同步更新到資料庫快照表 (節流：每 1.0 秒最多一次)
+            now = time.time()
+            last_sync = self._last_state_sync.get(person_id, 0)
+            if now - last_sync >= 1.0:
+                try:
+                    self.db.update_member_state(state)
+                    self._last_state_sync[person_id] = now
+                except Exception as e:
+                    self.debug_log(f"Failed to update member state in DB: {e}")
     
     def _check_batch_timeout(self):
         """檢查批次超時並強制刷新"""
@@ -395,6 +414,10 @@ class MemoryLayerClient:
     def delete_all_members(self) -> bool:
         """刪除所有成員"""
         return self.db.delete_all_members()
+
+    def clear_all_events(self) -> bool:
+        """清除所有事件記憶"""
+        return self.db.clear_all_data()
 
     def get_all_members(self) -> List[Dict[str, Any]]:
         """取得所有成員"""
