@@ -25,16 +25,6 @@ main.py - NOMI Observation Layer 主程式入口
 import argparse
 import os
 import sys
-
-# 設定統一的 __pycache__ 路徑，避免散落在各個模組資料夾中
-# 這需要在導入任何自定義模組之前設定
-if __name__ == "__main__" or __package__ is None:
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    pycache_dir = os.path.join(base_dir, ".pycache")
-    if not os.path.exists(pycache_dir):
-        os.makedirs(pycache_dir, exist_ok=True)
-    sys.pycache_prefix = pycache_dir
-
 import threading
 import time
 from typing import Optional

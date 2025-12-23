@@ -66,11 +66,13 @@ class PersonActionInfo:
     person_id: int
     action_label: str = "等待識別"
     confidence: float = 0.0
+    duration: float = 0.0
     top_k_actions: List[tuple] = field(default_factory=list)
     skeleton_status: str = "等待偵測..."
     motion_status: str = "-"
     bbox: Optional[tuple] = None
     reid_name: Optional[str] = None
+    reid_confidence: float = 0.0
 
 
 class ReceiverCore(threading.Thread):
@@ -199,10 +201,14 @@ class ReceiverCore(threading.Thread):
             
             # ReID 識別
             reid_name = None
+            reid_confidence = 0.0
             if person.reid_vector is not None and self.memory_bridge:
                 match = self.memory_bridge.find_nearest_member(person.reid_vector, threshold=0.3)
                 if match:
                     reid_name = match.get('name')
+                    # 距離越小信心度越高，假設 threshold 是 0.3，距離 0 是 100%
+                    distance = match.get('distance', 0.3)
+                    reid_confidence = max(0.0, 1.0 - distance)
             
             info = PersonActionInfo(
                 person_id=person_id,
@@ -212,7 +218,9 @@ class ReceiverCore(threading.Thread):
                 skeleton_status=skel_status,
                 motion_status=motion_text,
                 bbox=person.box,
-                reid_name=reid_name
+                reid_name=reid_name,
+                reid_confidence=reid_confidence,
+                duration=result.duration if result else 0.0
             )
             results.append(info)
         

@@ -171,6 +171,8 @@ class SkeletonPlayer:
         self.last_frame = None
         self.frames_played = 0
         self.buffer_low_count = 0
+        # 追蹤從 processor 讀取的總幀數
+        self._last_consumed_count = 0
         
     def set_buffer(self, new_frames: list):
         """追加新幀到緩衝區"""
@@ -193,8 +195,30 @@ class SkeletonPlayer:
     def get_next_frame(self):
         """獲取下一幀要顯示的骨架幀"""
         if self.processor:
-            new_frames = self.processor.get_interpolated_frames()
-            self.set_buffer(new_frames)
+            # 使用 interpolated_frame_count 來精確追蹤新增的幀
+            current_total = getattr(self.processor, 'interpolated_frame_count', 0)
+            
+            if current_total > self._last_consumed_count:
+                new_count = current_total - self._last_consumed_count
+                self._last_consumed_count = current_total
+                
+                # 從 deque 尾部取出最新的 N 幀
+                proc_buffer = list(self.processor.interpolated_buffer)
+                new_frames = proc_buffer[-new_count:] if new_count < len(proc_buffer) else proc_buffer
+                
+                if new_frames:
+                    self.buffer.extend(new_frames)
+                    
+                    # 限制播放器內部的緩衝區大小
+                    max_buffer_size = 120
+                    if len(self.buffer) > max_buffer_size:
+                        overflow = len(self.buffer) - max_buffer_size
+                        self.buffer = self.buffer[overflow:]
+                        self.play_index = max(0, self.play_index - overflow)
+            
+            # 處理 processor 被重置的情況
+            elif current_total < self._last_consumed_count:
+                self._last_consumed_count = current_total
             
         if not self.buffer:
             return self.last_frame
@@ -242,6 +266,43 @@ class SkeletonPlayer:
         
         return target_frame
     
+    def get_next_frame_linear(self):
+        """
+        線性獲取下一幀，不進行智慧調速（適合 Web 串流）
+        """
+        if self.processor:
+            current_total = getattr(self.processor, 'interpolated_frame_count', 0)
+            if current_total > self._last_consumed_count:
+                new_count = current_total - self._last_consumed_count
+                self._last_consumed_count = current_total
+                proc_buffer = list(self.processor.interpolated_buffer)
+                new_frames = proc_buffer[-new_count:] if new_count < len(proc_buffer) else proc_buffer
+                if new_frames:
+                    self.buffer.extend(new_frames)
+                    if len(self.buffer) > 120:
+                        overflow = len(self.buffer) - 120
+                        self.buffer = self.buffer[overflow:]
+                        self.play_index = max(0, self.play_index - overflow)
+        
+        if not self.buffer:
+            return self.last_frame
+            
+        if self.play_index >= len(self.buffer):
+            # 緩衝區空了，返回最後一幀
+            return self.last_frame
+            
+        target_frame = self.buffer[self.play_index]
+        self.last_frame = target_frame
+        self.play_index += 1
+        
+        # 清理
+        if self.play_index > 60:
+            cleanup_count = self.play_index - 30
+            self.buffer = self.buffer[cleanup_count:]
+            self.play_index -= cleanup_count
+            
+        return target_frame
+    
     def get_buffer_status(self) -> dict:
         """獲取緩衝區狀態"""
         return {
@@ -267,3 +328,4 @@ class SkeletonPlayer:
         self.last_frame = None
         self.frames_played = 0
         self.buffer_low_count = 0
+        self._last_consumed_count = 0

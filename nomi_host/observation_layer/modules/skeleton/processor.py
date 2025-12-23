@@ -768,10 +768,14 @@ class SkeletonProcessor:
         if max_frames == 0:
             return
         
-        self.debug_log(f"Adding {max_frames} interpolated frames from preprocessor")
+        # 計算每幀的時間間隔 (目標 30 FPS 輸出)
+        frame_interval = 1.0 / 30.0
         
         for frame_idx in range(max_frames):
             interp_persons = []
+            
+            # 給每個補幀一個遞增的 timestamp，避免被 player 過濾掉
+            frame_timestamp = base_timestamp + (frame_idx * frame_interval)
             
             for person_id, box, score, frames, reid_vector in interpolated_persons_list:
                 if frame_idx < len(frames):
@@ -782,7 +786,7 @@ class SkeletonProcessor:
                         box=box,
                         score=score,
                         keypoints=interp_kpts,
-                        timestamp=base_timestamp,
+                        timestamp=frame_timestamp,
                         smoothed_keypoints=interp_kpts,
                         reid_vector=reid_vector
                     )
@@ -790,7 +794,7 @@ class SkeletonProcessor:
             
             if interp_persons:
                 interp_frame = SkeletonFrame(
-                    timestamp=base_timestamp,
+                    timestamp=frame_timestamp,
                     frame_no=frame_no,
                     persons=interp_persons
                 )

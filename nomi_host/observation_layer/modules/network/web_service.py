@@ -109,7 +109,10 @@ class WebService(threading.Thread):
                     "confidence": action.confidence,
                     "skeleton_status": action.skeleton_status,
                     "motion_status": action.motion_status,
-                    "bbox": action.bbox
+                    "bbox": action.bbox,
+                    "reid_name": action.reid_name,
+                    "reid_confidence": action.reid_confidence,
+                    "duration": action.duration
                 })
         
         # 3. 封裝訊息
