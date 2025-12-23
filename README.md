@@ -1,7 +1,38 @@
-# Himax examples for Seeed Grove Vision AI Module V2
-This is a repository which step by step teaches you how to build your own examples and run on Seeed Grove Vision AI Module V2.
-Finally, teach you how to restore to the original factory settings and run [SenseCraft AI](https://wiki.seeedstudio.com/grove_vision_ai_v2_software_support/#-no-code-getting-started-with-sensecraft-ai-) from [Seeed Studio](https://wiki.seeedstudio.com/grove_vision_ai_v2/).
-## Outline
+# NOMI Agent: Non-verbal Observation & Minimal Interaction
+
+NOMI 是一個基於 Himax WiseEye2 (Grove Vision AI V2) 的家庭智能感知系統。它結合了邊緣運算與雲端記憶，能夠識別家庭成員的動作、建立長期記憶，並提供直觀的 Web 管理介面。
+
+## 🌟 專案亮點
+
+- **邊緣感知 (Edge Perception)**: 利用 WiseEye2 進行即時骨架提取與動作識別。
+- **動作識別 (Action Recognition)**: 整合 MMAction2 框架，支援多種家庭行為識別。
+- **長期記憶 (Long-term Memory)**: 使用 PostgreSQL + pgvector 儲存成員特徵與事件記錄。
+- **流暢體驗 (Smooth Experience)**: 網頁端支援 15 FPS 的補幀視覺化，與模型處理同步。
+- **模組化設計**: 包含感知層、記憶層、推論層與控制面板。
+
+---
+
+## 📂 專案結構
+
+- `nomi_host/`: 系統核心，包含後端 Orchestrator 與前端 Web Console。
+- `EPII_CM55M_APP_S/`: WiseEye2 韌體原始碼。
+- `model_zoo/`: 預訓練模型庫 (TFLite)。
+- `we2_image_gen_local/`: 韌體影像生成工具。
+- `esp_forwarder/`: ESP32 轉發器程式 (用於無線傳輸)。
+
+---
+
+## 🚀 快速開始
+
+請參考 [nomi_host/README.md](nomi_host/README.md) 了解如何啟動主機端系統。
+
+---
+
+## 🛠️ 韌體開發 (Himax WiseEye2)
+
+如果您需要修改 WiseEye2 的韌體或重新編譯，請參考以下說明。
+
+### Outline
 - How to build the firmware?
     - [Build the firmware at Linux environment](https://github.com/HimaxWiseEyePlus/Seeed_Grove_Vision_AI_Module_V2?tab=readme-ov-file#build-the-firmware-at-linux-environment)
     - [Build the firmware at MacOS environment](https://github.com/HimaxWiseEyePlus/Seeed_Grove_Vision_AI_Module_V2?tab=readme-ov-file#build-the-firmware-at-macos-environment)
