@@ -4,7 +4,7 @@
 # VScode
 .vscode
 
-# Python
+# Python bytecode cache (standard Python behavior)
 __pycache__/
 *.pyc
 *.pyo
@@ -23,5 +23,4 @@ pip-delete-this-directory.txt
 # Output files
 *.img
 
-# Submodules
-observation_layer/mmaction2/
+node_modules
