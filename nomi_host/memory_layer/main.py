@@ -22,12 +22,19 @@ NOMI Memory Layer Layer - 主程式入口
     core = MemoryCore()
     core.start()
 """
-import argparse
 import os
 import sys
 
+_base_dir = os.path.dirname(os.path.abspath(__file__))
+_pycache_dir = os.path.join(_base_dir, '__pycache__')
+
+os.makedirs(_pycache_dir, exist_ok=True)
+sys.pycache_prefix = _pycache_dir
+
+import argparse
+
 # 確保可以導入當前目錄的模組
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(_base_dir)
 
 
 def run_gui():

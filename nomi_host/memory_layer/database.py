@@ -598,6 +598,29 @@ class DatabaseManager:
             cursor.execute('DELETE FROM member_registry WHERE member_id = %s', (member_id,))
             return True
 
+    def delete_member_by_id(self, member_id: int) -> bool:
+        """透過 ID 刪除成員"""
+        if not self._connected:
+            return False
+        with self.get_cursor() as cursor:
+            # 解除 unified_telemetry 的關聯 (設為 NULL)
+            cursor.execute('UPDATE unified_telemetry SET matched_member_id = NULL WHERE matched_member_id = %s', (member_id,))
+            
+            # 解除 member_state_snapshot 的關聯
+            cursor.execute('UPDATE member_state_snapshot SET member_id = NULL, member_name = NULL WHERE member_id = %s', (member_id,))
+            
+            # 刪除成員
+            cursor.execute('DELETE FROM member_registry WHERE member_id = %s', (member_id,))
+            return True
+
+    def update_member_name(self, member_id: int, new_name: str) -> bool:
+        """更新成員名稱"""
+        if not self._connected:
+            return False
+        with self.get_cursor() as cursor:
+            cursor.execute('UPDATE member_registry SET name = %s, updated_at = NOW() WHERE member_id = %s', (new_name, member_id))
+            return cursor.rowcount > 0
+
     def delete_all_members(self) -> bool:
         """刪除所有成員"""
         if not self._connected:
