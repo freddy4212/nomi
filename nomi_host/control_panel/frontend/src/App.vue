@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { X } from 'lucide-vue-next'
 import Navbar from './components/Navbar.vue'
 import Footer from './components/Footer.vue'
@@ -12,13 +12,33 @@ import SettingsView from './views/SettingsView.vue'
 
 const currentModule = ref('perception')
 const currentTool = ref(null)
+const transitionName = ref('fade')
+
+const modules = ['perception', 'memory', 'inference']
+
+watch(currentModule, (newVal, oldVal) => {
+  // Mobile: Use fade transition
+  if (window.innerWidth < 768) {
+    transitionName.value = 'fade'
+    return
+  }
+
+  // Desktop: Use slide transition
+  const newIndex = modules.indexOf(newVal)
+  const oldIndex = modules.indexOf(oldVal)
+  if (newIndex > oldIndex) {
+    transitionName.value = 'slide-left'
+  } else {
+    transitionName.value = 'slide-right'
+  }
+})
 
 // System Status (from PerceptionView)
 const tcpConnected = ref(false)
-const tcpActive = ref(false)
+const tcpLastActive = ref(0)
 const tcpPort = ref(0)
 const dbConnected = ref(false)
-const dbActive = ref(false)
+const dbLastActive = ref(0)
 const dbPort = ref(0)
 const hostIp = ref('127.0.0.1')
 
@@ -26,10 +46,10 @@ let statusTimeout = null
 
 const handleStatusUpdate = (meta) => {
   tcpConnected.value = meta.tcp_connected ?? tcpConnected.value
-  tcpActive.value = meta.tcp_active ?? false
+  tcpLastActive.value = meta.tcp_last_active ?? tcpLastActive.value
   tcpPort.value = meta.tcp_port ?? tcpPort.value
   dbConnected.value = meta.memory_connected ?? dbConnected.value
-  dbActive.value = meta.db_active ?? false
+  dbLastActive.value = meta.db_last_active ?? dbLastActive.value
   dbPort.value = meta.db_port ?? dbPort.value
   hostIp.value = meta.host_ip ?? hostIp.value
 
@@ -38,9 +58,6 @@ const handleStatusUpdate = (meta) => {
   
   // If we haven't received an update in 2 seconds, assume backend is dead or idle
   statusTimeout = setTimeout(() => {
-    tcpActive.value = false
-    dbActive.value = false
-    // If we really want to be sure it's disconnected when no data comes:
     // tcpConnected.value = false
     // dbConnected.value = false
   }, 2000)
@@ -85,7 +102,7 @@ const closeTool = () => {
 </script>
 
 <template>
-  <div class="flex flex-col h-screen bg-bgDark text-white relative overflow-hidden">
+  <div class="flex flex-col h-dvh bg-bgDark text-white relative overflow-hidden">
     <Navbar 
       :current-module="currentModule"
       :current-tool="currentTool"
@@ -94,8 +111,12 @@ const closeTool = () => {
     />
     
     <!-- Main Content Area -->
-    <main class="flex-1 overflow-auto p-4 relative z-0">
-      <component :is="moduleView" @status-update="handleStatusUpdate" />
+    <main class="flex-1 overflow-hidden relative z-0">
+      <Transition :name="transitionName">
+        <KeepAlive>
+          <component :is="moduleView" @status-update="handleStatusUpdate" />
+        </KeepAlive>
+      </Transition>
     </main>
     
     <!-- Tool Popup Click-Outside Overlay -->
@@ -116,7 +137,7 @@ const closeTool = () => {
         /* Mobile: Full screen below navbar */
         inset-0 top-[72px] bg-bgDark/95 backdrop-blur-sm
         /* Desktop: Bubble Card top-right */
-        md:inset-auto md:top-[88px] md:right-4 md:w-[480px] md:max-h-[80vh] 
+        md:inset-auto md:top-[88px] md:right-4 md:w-fit md:min-w-[400px] md:max-h-[92vh] 
         md:bg-gray-800 md:border md:border-gray-600 md:rounded-xl md:shadow-2xl
       ">
         <!-- Popup Header -->
@@ -134,7 +155,7 @@ const closeTool = () => {
         </div>
 
         <!-- Popup Content -->
-        <div class="flex-1 overflow-y-auto p-4">
+        <div class="flex-1 overflow-y-auto p-2">
           <component :is="toolView" @status-update="handleStatusUpdate" />
         </div>
         
@@ -151,12 +172,55 @@ const closeTool = () => {
 
     <Footer 
       :tcp-connected="tcpConnected"
-      :tcp-active="tcpActive"
+      :tcp-last-active="tcpLastActive"
       :tcp-port="tcpPort"
       :db-connected="dbConnected"
-      :db-active="dbActive"
+      :db-last-active="dbLastActive"
       :db-port="dbPort"
       :host-ip="hostIp"
     />
   </div>
 </template>
+
+<style>
+/* Common Transition Styles */
+.slide-left-enter-active,
+.slide-left-leave-active,
+.slide-right-enter-active,
+.slide-right-leave-active {
+  transition: transform 0.2s linear;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* Slide Left (Next) */
+.slide-left-enter-from {
+  transform: translateX(100%);
+}
+.slide-left-leave-to {
+  transform: translateX(-100%);
+}
+
+/* Slide Right (Prev) */
+.slide-right-enter-from {
+  transform: translateX(-100%);
+}
+.slide-right-leave-to {
+  transform: translateX(100%);
+}
+
+/* Fade (Default) */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+</style>

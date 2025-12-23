@@ -1,19 +1,12 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, defineEmits } from 'vue'
-import { Play, Square, Database, Download, Trash2 } from 'lucide-vue-next'
+import { Play, Square, Trash2 } from 'lucide-vue-next'
 
 const emit = defineEmits(['status-update'])
 
-const viewMode = ref('overlay')
 const isRunning = ref(true) // Default assume running
 const isDbLoading = ref(false)
 let ws = null
-
-const modes = [
-  { id: 'overlay', name: '疊加顯示 (Overlay)' },
-  { id: 'skeleton', name: '僅骨架 (Skeleton Only)' },
-  { id: 'image', name: '僅影像 (Image Only)' }
-]
 
 const connectWebSocket = () => {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -99,25 +92,6 @@ onUnmounted(() => {
 
 <template>
   <div class="h-full flex flex-col gap-6">
-    <!-- View Mode -->
-    <section>
-      <h3 class="text-sm font-bold text-gray-400 uppercase tracking-wider mb-3 px-1">
-        顯示模式 (View Mode)
-      </h3>
-      <div class="grid grid-cols-1 gap-2">
-        <button 
-          v-for="mode in modes" 
-          :key="mode.id"
-          @click="viewMode = mode.id"
-          class="p-3 rounded-lg border text-left transition-all relative overflow-hidden group flex items-center justify-between"
-          :class="viewMode === mode.id ? 'bg-primary/10 border-primary text-primary' : 'bg-bgLight border-gray-700 hover:bg-gray-700 text-gray-300'"
-        >
-          <span class="font-medium">{{ mode.name }}</span>
-          <div v-if="viewMode === mode.id" class="w-2 h-2 rounded-full bg-primary shadow-[0_0_8px_rgba(0,217,255,0.8)]"></div>
-        </button>
-      </div>
-    </section>
-    
     <!-- System Control -->
     <section>
       <h3 class="text-sm font-bold text-gray-400 uppercase tracking-wider mb-3 px-1">
@@ -160,11 +134,11 @@ onUnmounted(() => {
           
           <button 
             @click="clearMemory"
-            class="px-4 py-2 bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white border border-red-500/50 rounded-lg text-sm font-medium transition-all flex items-center gap-2"
+            class="w-12 h-12 rounded-full bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white border border-red-500/50 flex items-center justify-center transition-all shadow-lg active:scale-95 disabled:opacity-30"
             :disabled="isDbLoading"
+            title="清除事件記憶"
           >
-            <Trash2 class="w-4 h-4" :class="{'animate-pulse': isDbLoading}" />
-            清除事件記憶
+            <Trash2 class="w-5 h-5" :class="{'animate-pulse': isDbLoading}" />
           </button>
         </div>
       </div>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, defineEmits } from 'vue'
-import { Maximize2, Activity, User, Zap, Database, Cpu, Hash, Info, Layers, Monitor, X } from 'lucide-vue-next'
+import { Maximize2, Activity, User, Zap, Database, Cpu, Hash, Info, Layers, Monitor, X, Clock, Scan } from 'lucide-vue-next'
+import CameraStream from '../components/CameraStream.vue'
 
 const emit = defineEmits(['status-update'])
 
@@ -14,125 +15,83 @@ const deviceModel = ref('Unknown')
 const memoryConnected = ref(false)
 const bufferStatus = ref({})
 const personCount = ref(0)
-const imageData = ref(null)
 const persons = ref([])
-const isConnected = ref(false)
 const showMobileInfo = ref(false)
-let ws = null
 
-const connectWebSocket = () => {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const host = window.location.hostname
-  // Use dedicated video channel
-  ws = new WebSocket(`${protocol}//${host}:8000/ws/video`)
-  
-  ws.onopen = () => {
-    isConnected.value = true
-    console.log('PerceptionView WS Connected (Video Channel)')
-  }
-  
-  ws.onmessage = (event) => {
-    try {
-      const data = JSON.parse(event.data)
-      
-      if (data.type === 'frame_update' || data.type === 'status_update') {
-        if (data.meta) {
-          emit('status-update', data.meta)
-          
-          // 只有當數值存在時才更新，避免閃爍
-          if (data.meta.fps !== undefined) fps.value = data.meta.fps.toFixed(1)
-          if (data.meta.algo_tick !== undefined) algoTick.value = data.meta.algo_tick
-          if (data.meta.frame_no !== undefined) frameNo.value = data.meta.frame_no
-          
-          if (data.meta.device_id && data.meta.device_id !== 'Unknown') deviceId.value = data.meta.device_id
-          if (data.meta.device_version && data.meta.device_version !== 'Unknown') deviceVersion.value = data.meta.device_version
-          if (data.meta.device_model && data.meta.device_model !== 'Unknown') deviceModel.value = data.meta.device_model
-          
-          memoryConnected.value = data.meta.memory_connected || false
-          bufferStatus.value = data.meta.buffer_status || {}
-        }
-      }
+// Mobile Info Carousel State
+const activeCardIndex = ref(0)
+const touchStartX = ref(0)
+const touchEndX = ref(0)
 
-      if (data.type === 'frame_update') {
-        if (data.image) {
-          imageData.value = `data:image/jpeg;base64,${data.image}`
-        }
-        persons.value = data.persons || []
-        personCount.value = persons.value.length
-      }
-    } catch (e) {
-      console.error('WS Parse Error', e)
-    }
+const handleTouchStart = (e) => {
+  touchStartX.value = e.changedTouches[0].screenX
+}
+
+const handleTouchEnd = (e) => {
+  touchEndX.value = e.changedTouches[0].screenX
+  if (touchEndX.value < touchStartX.value - 30) {
+    // Swipe Left -> Next
+    if (activeCardIndex.value < 2) activeCardIndex.value++
   }
-  
-  ws.onclose = () => {
-    isConnected.value = false
-    console.log('WebSocket Disconnected')
-    // Notify App.vue that we are disconnected
-    emit('status-update', {
-      tcp_connected: false,
-      memory_connected: false,
-      tcp_active: false,
-      db_active: false,
-      tcp_port: 0,
-      db_port: 0
-    })
-    // Try reconnect after 3s
-    setTimeout(connectWebSocket, 3000)
+  if (touchEndX.value > touchStartX.value + 30) {
+    // Swipe Right -> Prev
+    if (activeCardIndex.value > 0) activeCardIndex.value--
   }
 }
 
-onMounted(() => {
-  connectWebSocket()
-})
+const handleFrameUpdate = (data) => {
+  persons.value = data.persons || []
+  personCount.value = persons.value.length
+}
 
-onUnmounted(() => {
-  if (ws) ws.close()
-})
+const handleStatusUpdate = (meta) => {
+  emit('status-update', meta)
+  
+  // 只有當數值存在時才更新，避免閃爍
+  if (meta.fps !== undefined) fps.value = meta.fps.toFixed(1)
+  if (meta.algo_tick !== undefined) algoTick.value = meta.algo_tick
+  if (meta.frame_no !== undefined) frameNo.value = meta.frame_no
+  
+  if (meta.device_id && meta.device_id !== 'Unknown') deviceId.value = meta.device_id
+  if (meta.device_version && meta.device_version !== 'Unknown') deviceVersion.value = meta.device_version
+  if (meta.device_model && meta.device_model !== 'Unknown') deviceModel.value = meta.device_model
+  
+  memoryConnected.value = meta.memory_connected || false
+  bufferStatus.value = meta.buffer_status || {}
+}
+
+const formatStatus = (statusStr) => {
+  if (!statusStr) return { value: '-', label: '' }
+  const match = statusStr.match(/^([^(]+)(?:\(([^)]+)\))?$/)
+  if (match) {
+    return { value: match[1], label: match[2] || '' }
+  }
+  return { value: statusStr, label: '' }
+}
 </script>
 
 <template>
-  <div class="h-full p-2 grid grid-cols-1 md:grid-cols-2 grid-rows-[auto_1fr] md:grid-rows-1 gap-4 overflow-hidden relative">
+  <div class="h-full p-2 grid grid-cols-1 md:grid-cols-2 grid-rows-[auto_1fr] md:grid-rows-1 gap-6 md:gap-4 overflow-hidden relative">
     
     <!-- Left (Desktop) / Top (Mobile): Video Area + Info Cards (Desktop Only) -->
     <div class="flex flex-col md:justify-center items-center relative">
       
       <!-- Content Wrapper (Video + Cards) -->
-      <div class="w-full max-w-2xl flex flex-col gap-4 md:gap-8 relative">
+      <div class="w-[92%] md:w-full max-w-2xl flex flex-col gap-4 md:gap-8 relative">
         
         <!-- Video Container -->
-        <div class="relative group">
-          <div class="relative rounded-xl overflow-hidden shadow-2xl bg-black w-full aspect-[4/3]">
-            <!-- Image Display -->
-            <img v-if="imageData" :src="imageData" class="w-full h-full object-contain" />
-            
-            <!-- Placeholder -->
-            <div v-else class="absolute inset-0 flex items-center justify-center text-gray-600 flex-col gap-2">
-              <Activity class="w-10 h-10 animate-pulse opacity-50" />
-              <div class="text-center">
-                <p class="text-sm font-bold">等待影像訊號...</p>
-                <p class="text-xs opacity-50">Waiting for video stream</p>
-              </div>
-            </div>
-            
-            <!-- Status Indicator (Minimal) -->
-            <div class="absolute top-3 left-3 flex items-center gap-2">
-               <span class="w-2 h-2 rounded-full shadow-[0_0_8px_currentColor] transition-all duration-500" 
-                     :class="[
-                       !isConnected ? 'bg-red-500 text-red-500' : 
-                       fps > 0 ? 'bg-green-500 text-green-500 scale-110 animate-pulse' : 'bg-blue-500 text-blue-500'
-                     ]"></span>
-            </div>
+        <div class="relative group bg-black rounded-xl border border-gray-800 shadow-2xl flex items-center justify-center w-full aspect-[4/3] mx-auto">
+          <!-- Grid Background -->
+          <div class="absolute inset-0 opacity-5 pointer-events-none rounded-xl overflow-hidden" 
+               style="background-image: radial-gradient(#374151 1px, transparent 1px); background-size: 20px 20px;"></div>
+          
+          <div class="w-full h-full relative z-10 rounded-xl overflow-hidden">
+            <CameraStream 
+              @frame-update="handleFrameUpdate"
+              @status-update="handleStatusUpdate"
+              @toggle-info="showMobileInfo = !showMobileInfo"
+            />
           </div>
-
-          <!-- Mobile Info Toggle (Inside Video Area) -->
-          <button 
-            @click.stop="showMobileInfo = !showMobileInfo"
-            class="md:hidden absolute bottom-3 right-3 w-8 h-8 backdrop-blur-md rounded-full shadow-lg flex items-center justify-center z-20 transition-all border"
-            :class="showMobileInfo ? 'bg-gray-900 text-white border-gray-600' : 'bg-white/10 text-white/80 border-white/20'"
-          >
-            <Info class="w-4 h-4" />
-          </button>
 
           <!-- Mobile Info Bubble (Popover - Positioned below i button) -->
           <Transition
@@ -147,51 +106,79 @@ onUnmounted(() => {
               <!-- Click Outside Overlay for Info -->
               <div class="fixed inset-0 z-[-1] bg-transparent" @click="showMobileInfo = false"></div>
               
-              <div class="bg-bgDark/95 backdrop-blur-xl border border-gray-700 rounded-2xl p-3 shadow-2xl space-y-2.5 relative">
+              <div 
+                class="bg-bgDark/95 backdrop-blur-xl border border-gray-700 rounded-2xl p-3 shadow-2xl relative"
+                @touchstart="handleTouchStart"
+                @touchend="handleTouchEnd"
+              >
                 <!-- Triangle Arrow (Aligned with i button) -->
                 <div class="absolute -top-1.5 right-[21px] w-3.5 h-3.5 bg-bgDark border-t border-r border-gray-700 transform rotate-[-45deg]"></div>
                 
-                <!-- Card 1: Device Info -->
-                <div class="bg-bgLight/50 rounded-xl p-2.5 border border-white/5">
-                  <div class="text-gray-400 text-[9px] uppercase tracking-wider flex items-center gap-1 mb-1.5">
-                    <Monitor class="w-3 h-3" /> Device Info
-                  </div>
-                  <div>
-                    <div class="text-sm font-bold text-white truncate mb-1">{{ deviceId }}</div>
-                    <div class="text-[10px] text-gray-500 font-mono space-y-0.5">
-                       <div class="flex justify-between"><span>Version:</span> <span class="text-gray-300">{{ deviceVersion }}</span></div>
-                       <div class="flex justify-between"><span>Model:</span> <span class="text-gray-300">{{ deviceModel }}</span></div>
+                <!-- Carousel Container -->
+                <div class="overflow-hidden">
+                  <div class="flex transition-transform duration-300 ease-out" :style="{ transform: `translateX(-${activeCardIndex * 100}%)` }">
+                    
+                    <!-- Card 1: Device Info -->
+                    <div class="w-full shrink-0 px-0.5">
+                      <div class="bg-bgLight/50 rounded-xl p-2.5 border border-white/5 h-full">
+                        <div class="text-gray-400 text-[9px] uppercase tracking-wider flex items-center gap-1 mb-1.5">
+                          <Monitor class="w-3 h-3" /> Device Info
+                        </div>
+                        <div>
+                          <div class="text-sm font-bold text-white truncate mb-1">{{ deviceId }}</div>
+                          <div class="text-[10px] text-gray-500 font-mono space-y-0.5">
+                            <div class="flex justify-between"><span>Version:</span> <span class="text-gray-300">{{ deviceVersion }}</span></div>
+                            <div class="flex justify-between"><span>Model:</span> <span class="text-gray-300">{{ deviceModel }}</span></div>
+                          </div>
+                        </div>
+                      </div>
                     </div>
+
+                    <!-- Card 2: Frame Info -->
+                    <div class="w-full shrink-0 px-0.5">
+                      <div class="bg-bgLight/50 rounded-xl p-2.5 border border-white/5 h-full">
+                        <div class="text-gray-400 text-[9px] uppercase tracking-wider flex items-center gap-1 mb-1.5">
+                          <Layers class="w-3 h-3" /> Frame Info
+                        </div>
+                        <div class="flex items-baseline gap-2 mb-1">
+                          <div class="text-lg font-bold text-primary">{{ fps }}</div>
+                          <div class="text-[9px] text-gray-500 font-bold">FPS</div>
+                        </div>
+                        <div class="text-[10px] text-gray-400 font-mono space-y-0.5">
+                          <div class="flex justify-between"><span>Tick:</span> <span class="text-gray-300">{{ algoTick }}</span></div>
+                          <div class="flex justify-between"><span>Frame No:</span> <span class="text-gray-300">{{ frameNo }}</span></div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- Card 3: Interpolation -->
+                    <div class="w-full shrink-0 px-0.5">
+                      <div class="bg-bgLight/50 rounded-xl p-2.5 border border-white/5 h-full">
+                        <div class="text-gray-400 text-[9px] uppercase tracking-wider flex items-center gap-1 mb-1.5">
+                          <Activity class="w-3 h-3" /> Interpolation
+                        </div>
+                        <div class="text-sm font-bold mb-1" :class="bufferStatus.sequence_ready ? 'text-secondary' : 'text-yellow-500'">
+                          {{ bufferStatus.sequence_ready ? 'Ready' : 'Buffering...' }}
+                        </div>
+                        <div class="text-[10px] text-gray-400 font-mono space-y-0.5">
+                          <div class="flex justify-between"><span>Raw Frame:</span> <span class="text-gray-300">{{ bufferStatus.raw_frames || 0 }}</span></div>
+                          <div class="flex justify-between"><span>Buffed Frame:</span> <span class="text-gray-300">{{ bufferStatus.interpolated_frames || 0 }}</span></div>
+                        </div>
+                      </div>
+                    </div>
+
                   </div>
                 </div>
 
-                <!-- Card 2: Frame Info -->
-                <div class="bg-bgLight/50 rounded-xl p-2.5 border border-white/5">
-                  <div class="text-gray-400 text-[9px] uppercase tracking-wider flex items-center gap-1 mb-1.5">
-                    <Layers class="w-3 h-3" /> Frame Info
-                  </div>
-                  <div class="flex items-baseline gap-2 mb-1">
-                    <div class="text-lg font-bold text-primary">{{ fps }}</div>
-                    <div class="text-[9px] text-gray-500 font-bold">FPS</div>
-                  </div>
-                  <div class="text-[10px] text-gray-400 font-mono space-y-0.5">
-                    <div class="flex justify-between"><span>Tick:</span> <span class="text-gray-300">{{ algoTick }}</span></div>
-                    <div class="flex justify-between"><span>Frame No:</span> <span class="text-gray-300">{{ frameNo }}</span></div>
-                  </div>
-                </div>
-
-                <!-- Card 3: Interpolation -->
-                <div class="bg-bgLight/50 rounded-xl p-2.5 border border-white/5">
-                  <div class="text-gray-400 text-[9px] uppercase tracking-wider flex items-center gap-1 mb-1.5">
-                    <Activity class="w-3 h-3" /> Interpolation
-                  </div>
-                  <div class="text-sm font-bold mb-1" :class="bufferStatus.sequence_ready ? 'text-secondary' : 'text-yellow-500'">
-                    {{ bufferStatus.sequence_ready ? 'Ready' : 'Buffering...' }}
-                  </div>
-                  <div class="text-[10px] text-gray-400 font-mono space-y-0.5">
-                    <div class="flex justify-between"><span>Raw Frame:</span> <span class="text-gray-300">{{ bufferStatus.raw_frames || 0 }}</span></div>
-                    <div class="flex justify-between"><span>Buffed Frame:</span> <span class="text-gray-300">{{ bufferStatus.interpolated_frames || 0 }}</span></div>
-                  </div>
+                <!-- Dots Indicator -->
+                <div class="flex justify-center gap-1.5 mt-2.5">
+                  <button 
+                    v-for="i in 3" 
+                    :key="i" 
+                    @click.stop="activeCardIndex = i-1"
+                    class="h-1.5 rounded-full transition-all duration-300"
+                    :class="activeCardIndex === i-1 ? 'bg-white w-4' : 'bg-gray-600 w-1.5'"
+                  ></button>
                 </div>
               </div>
             </div>
@@ -266,38 +253,74 @@ onUnmounted(() => {
             <!-- ID Badge -->
             <div class="absolute top-0 right-0 bg-gray-800 px-3 py-1 rounded-bl-xl text-xs font-mono text-gray-400 border-b border-l border-gray-700 flex items-center gap-2">
               <span>ID: {{ person.id }}</span>
-              <span v-if="person.reid_name" class="text-blue-400 font-bold border-l border-gray-600 pl-2">{{ person.reid_name }}</span>
             </div>
 
-            <!-- Action (Main) -->
-            <div class="mb-4">
-              <div class="text-gray-400 text-xs mb-1 uppercase tracking-wider flex items-center gap-1">
-                <Activity class="w-3 h-3" /> 目前動作 (Action)
-              </div>
-              <div class="text-2xl font-bold text-primary truncate">{{ person.action }}</div>
-              <div class="text-xs text-gray-500 mt-1 flex items-center gap-2">
-                <div class="h-1.5 w-24 bg-gray-700 rounded-full overflow-hidden">
-                  <div class="h-full bg-primary transition-all duration-300" :style="{ width: `${person.confidence * 100}%` }"></div>
-                </div>
-                <span>{{ (person.confidence * 100).toFixed(1) }}%</span>
-              </div>
-            </div>
-
-            <div class="grid grid-cols-2 gap-4">
-              <!-- Skeleton Status -->
+            <!-- Top Section: Action & ReID -->
+            <div class="grid grid-cols-2 gap-6 mb-4">
+              <!-- Action -->
               <div>
-                <div class="text-gray-400 text-xs mb-1 uppercase tracking-wider flex items-center gap-1">
-                  <User class="w-3 h-3" /> 骨架狀態
+                <div class="text-gray-400 text-[10px] mb-1 uppercase tracking-wider flex items-center gap-1">
+                  <Activity class="w-3 h-3" /> 動作
                 </div>
-                <div class="text-sm text-gray-300">{{ person.skeleton_status }}</div>
+                <div class="text-2xl md:text-3xl font-bold text-primary truncate">{{ person.action }}</div>
+                <div class="text-[10px] text-gray-500 mt-1 flex items-center gap-2">
+                  <div class="h-1 w-full bg-gray-700 rounded-full overflow-hidden">
+                    <div class="h-full bg-primary transition-all duration-300" :style="{ width: `${person.confidence * 100}%` }"></div>
+                  </div>
+                  <span class="whitespace-nowrap">{{ (person.confidence * 100).toFixed(0) }}%</span>
+                </div>
+              </div>
+
+              <!-- ReID -->
+              <div>
+                <div class="text-gray-400 text-[10px] mb-1 uppercase tracking-wider flex items-center gap-1">
+                  <User class="w-3 h-3" /> 識別
+                </div>
+                <div class="text-2xl md:text-3xl font-bold truncate" :class="person.reid_name ? 'text-blue-400' : 'text-gray-600'">
+                  {{ person.reid_name || '未知' }}
+                </div>
+                <div class="text-[10px] text-gray-500 mt-1 flex items-center gap-2">
+                  <div class="h-1 w-full bg-gray-700 rounded-full overflow-hidden">
+                    <div class="h-full bg-blue-400 transition-all duration-300" :style="{ width: `${(person.reid_confidence || 0) * 100}%` }"></div>
+                  </div>
+                  <span class="whitespace-nowrap">{{ ((person.reid_confidence || 0) * 100).toFixed(0) }}%</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Bottom Section: 3 Columns -->
+            <div class="grid grid-cols-3 gap-2 pt-3 border-t border-gray-800">
+              <!-- Skeleton Status -->
+              <div class="flex flex-col items-center justify-center text-center">
+                <div class="text-gray-500 text-[9px] mb-1 uppercase tracking-wider flex items-center gap-1">
+                  <Scan class="w-2.5 h-2.5" /> 骨架狀態
+                </div>
+                <div class="flex flex-col items-center leading-tight">
+                  <span class="text-sm md:text-base font-bold text-gray-200">{{ formatStatus(person.skeleton_status).value }}</span>
+                  <span v-if="formatStatus(person.skeleton_status).label" class="text-[10px] text-gray-400">{{ formatStatus(person.skeleton_status).label }}</span>
+                </div>
               </div>
 
               <!-- Motion Status -->
-              <div>
-                <div class="text-gray-400 text-xs mb-1 uppercase tracking-wider flex items-center gap-1">
-                  <Zap class="w-3 h-3" /> 動作強度
+              <div class="flex flex-col items-center justify-center text-center border-l border-gray-800">
+                <div class="text-gray-500 text-[9px] mb-1 uppercase tracking-wider flex items-center gap-1">
+                  <Zap class="w-2.5 h-2.5" /> 動作強度
                 </div>
-                <div class="text-sm text-gray-300">{{ person.motion_status }}</div>
+                <div class="flex flex-col items-center leading-tight">
+                  <span class="text-sm md:text-base font-bold text-gray-200">{{ formatStatus(person.motion_status).value }}</span>
+                  <span v-if="formatStatus(person.motion_status).label" class="text-[10px] text-gray-400">{{ formatStatus(person.motion_status).label }}</span>
+                </div>
+              </div>
+
+              <!-- Duration -->
+              <div class="flex flex-col items-center justify-center text-center border-l border-gray-800">
+                <div class="text-gray-500 text-[9px] mb-1 uppercase tracking-wider flex items-center gap-1">
+                  <Clock class="w-2.5 h-2.5" /> 持續時間
+                </div>
+                <div class="flex flex-col items-center leading-tight">
+                  <span class="text-sm md:text-base font-bold text-gray-200 font-mono">{{ (person.duration || 0).toFixed(1) }}</span>
+                  <span class="text-[10px] text-gray-400">s</span>
+                </div>
               </div>
             </div>
           </div>

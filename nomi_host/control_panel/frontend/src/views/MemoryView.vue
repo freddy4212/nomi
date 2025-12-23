@@ -1,13 +1,19 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, defineEmits } from 'vue'
-import { Clock, Database, RefreshCw } from 'lucide-vue-next'
+import { ref, onMounted, onUnmounted, defineEmits, computed } from 'vue'
+import { RefreshCw, ChevronDown, ChevronUp } from 'lucide-vue-next'
+import MemberCard from '../components/MemberCard.vue'
+import EventsTable from '../components/EventsTable.vue'
+import TimeRangePicker from '../components/TimeRangePicker.vue'
 
 const emit = defineEmits(['status-update'])
 
 const events = ref([])
+const allMembers = ref([])
 const isLoading = ref(false)
 const isPaused = ref(false)
 const showRangePicker = ref(false)
+const isMembersOpen = ref(false)
+const selectedMemberId = ref(null)
 const selectedRange = ref({ label: '今日', value: 86400 })
 
 const timeRanges = [
@@ -19,6 +25,57 @@ const timeRanges = [
 ]
 
 let ws = null
+
+const toggleMembers = () => {
+  isMembersOpen.value = !isMembersOpen.value
+}
+
+const selectMember = (id) => {
+  if (selectedMemberId.value === id) {
+    selectedMemberId.value = null
+  } else {
+    selectedMemberId.value = id
+  }
+}
+
+const editMember = (member) => {
+  const newName = prompt('請輸入新的成員名稱：', member.name)
+  if (newName && newName !== member.name) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'command',
+        command: 'update_member',
+        member_id: member.id,
+        name: newName
+      }))
+    }
+  }
+}
+
+const deleteMember = (member) => {
+  if (confirm(`確定要刪除成員「${member.name}」嗎？\n這將會解除所有相關事件的關聯。`)) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'command',
+        command: 'delete_member',
+        member_id: member.id
+      }))
+      if (selectedMemberId.value === member.id) {
+        selectedMemberId.value = null
+      }
+    }
+  }
+}
+
+const filteredEvents = computed(() => {
+  if (!selectedMemberId.value) return events.value
+  
+  // Find the member name to filter by
+  const member = allMembers.value.find(m => m.id === selectedMemberId.value)
+  if (!member) return events.value
+  
+  return events.value.filter(e => e.member_name === member.name)
+})
 
 const selectRange = (range) => {
   selectedRange.value = range
@@ -56,6 +113,8 @@ const connectWebSocket = () => {
       if (data.type === 'db_data') {
         if (data.query === 'recent_events') {
           events.value = data.data
+        } else if (data.query === 'all_members') {
+          allMembers.value = data.data
         }
         isLoading.value = false
       } else if (data.type === 'new_event') {
@@ -97,6 +156,7 @@ const fetchData = () => {
     limit: 100,
     duration_sec: selectedRange.value.value
   }))
+  ws.send(JSON.stringify({ type: 'db_query', query: 'all_members' }))
 }
 
 onMounted(() => {
@@ -115,124 +175,117 @@ const formatDate = (timestamp) => {
   const date = typeof timestamp === 'number' ? new Date(timestamp * 1000) : new Date(timestamp)
   if (isNaN(date.getTime())) return '-'
   return date.toLocaleString('zh-TW', { 
-    hour12: false,
+    year: 'numeric',
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
-    second: '2-digit'
-  })
+    second: '2-digit',
+    hour12: false
+  }).replace(/\//g, '-').replace(' ', '\n')
+}
+
+const formatDateInline = (timestamp) => {
+  if (!timestamp) return '-'
+  const date = typeof timestamp === 'number' ? new Date(timestamp * 1000) : new Date(timestamp)
+  if (isNaN(date.getTime())) return '-'
+  return date.toLocaleString('zh-TW', { 
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).replace(/\//g, '-')
 }
 </script>
 
 <template>
-  <div class="h-full flex flex-col p-4">
+  <div class="h-full flex flex-col p-4 md:p-6 gap-6">
     <!-- Header with Refresh and Filter -->
-    <div class="flex items-center justify-end mb-4 gap-2 relative">
-      <!-- Time Range Picker -->
-      <div class="relative">
-        <button 
-          @click="showRangePicker = !showRangePicker"
-          class="p-2 text-gray-400 hover:text-primary hover:bg-gray-800 rounded-lg transition-all flex items-center gap-2"
-          :class="{'text-primary bg-gray-800': showRangePicker}"
-          title="選擇時間範圍"
-        >
-          <Clock class="w-5 h-5" />
-        </button>
+    <div class="flex items-center justify-between relative z-50">
+      <!-- Left: Title / Toggle -->
+      <button 
+        type="button"
+        @click="toggleMembers"
+        class="flex items-center gap-2 group cursor-pointer text-gray-400 hover:text-white transition-colors py-2 select-none"
+        title="切換顯示已註冊成員"
+      >
+        <component :is="isMembersOpen ? ChevronUp : ChevronDown" class="w-5 h-5" />
+        <span class="font-bold text-lg tracking-wide">顯示已註冊成員</span>
+      </button>
 
-        <!-- Range Bubble -->
-        <div v-if="showRangePicker" 
-             class="absolute right-0 top-full mt-2 w-40 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl z-50 overflow-hidden">
-          <div class="p-1">
-            <button 
-              v-for="range in timeRanges" 
-              :key="range.value"
-              @click="selectRange(range)"
-              class="w-full text-left px-4 py-2.5 text-sm rounded-lg transition-colors"
-              :class="selectedRange.value === range.value ? 'bg-primary/20 text-primary font-bold' : 'text-gray-400 hover:bg-gray-800 hover:text-white'"
-            >
-              {{ range.label }}
-            </button>
-          </div>
-        </div>
-        
-        <!-- Click Outside Overlay -->
-        <div v-if="showRangePicker" @click="showRangePicker = false" class="fixed inset-0 z-40"></div>
-      </div>
+      <!-- Right: Tools -->
+      <div class="flex items-center gap-2">
+        <!-- Time Range Picker -->
+        <TimeRangePicker 
+          :selected-range="selectedRange" 
+          :time-ranges="timeRanges" 
+          @select="selectRange" 
+        />
 
       <!-- Sync Indicator / Pause Button -->
       <button 
-        @click="togglePause"
-        class="p-2 rounded-lg flex items-center justify-center transition-all group"
+        @click.stop="togglePause"
+        class="p-2 text-gray-400 hover:text-primary hover:bg-gray-800 rounded-lg flex items-center justify-center transition-colors group cursor-pointer relative z-50 isolate"
         :title="isPaused ? '恢復自動更新' : '暫停自動更新'"
       >
-        <RefreshCw 
-          class="w-5 h-5 transition-all" 
-          :class="[
-            isPaused ? 'text-gray-400' : 'text-primary drop-shadow-[0_0_8px_rgba(0,217,255,0.8)] animate-[spin_3s_linear_infinite]',
-            {'animate-[spin_1s_linear_infinite]': isLoading && !isPaused}
-          ]"
-        />
+        <div class="pointer-events-none relative">
+          <RefreshCw 
+            class="w-5 h-5 transition-none" 
+            :class="[
+              isPaused ? 'text-gray-400' : 'text-primary drop-shadow-[0_0_8px_rgba(0,217,255,0.8)] animate-[spin_3s_linear_infinite]',
+              {'animate-[spin_1s_linear_infinite]': isLoading && !isPaused}
+            ]"
+          />
+        </div>
       </button>
     </div>
+    </div>
 
-    <!-- Content -->
-    <div class="flex-1 bg-bgLight/50 backdrop-blur-sm rounded-2xl border border-gray-700 overflow-hidden shadow-2xl flex flex-col">
-      <!-- Events Table -->
-      <div class="flex-1 overflow-auto">
-        <table class="w-full text-left text-sm border-collapse">
-          <thead class="text-gray-400 bg-gray-800/80 sticky top-0 backdrop-blur-md z-10">
-            <tr>
-              <th class="p-4 font-medium border-b border-gray-700">時間</th>
-              <th class="p-4 font-medium border-b border-gray-700">人物 ID</th>
-              <th class="p-4 font-medium border-b border-gray-700">識別成員</th>
-              <th class="p-4 font-medium border-b border-gray-700">動作</th>
-              <th class="p-4 font-medium border-b border-gray-700">信心度</th>
-              <th class="p-4 font-medium border-b border-gray-700">持續時間</th>
-              <th class="p-4 font-medium border-b border-gray-700">位置</th>
-              <th class="p-4 font-medium border-b border-gray-700">BBox</th>
-              <th class="p-4 font-medium border-b border-gray-700">運動量</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-gray-800/50">
-            <tr v-if="events.length === 0" class="text-gray-500">
-              <td colspan="9" class="p-12 text-center">
-                <div class="flex flex-col items-center gap-2">
-                  <Database class="w-12 h-12 opacity-10" />
-                  <p>暫無事件資料</p>
-                </div>
-              </td>
-            </tr>
-            <tr v-for="event in events" :key="event.id" class="hover:bg-white/5 transition-colors group">
-              <td class="p-4 text-gray-400 font-mono text-xs whitespace-nowrap">{{ formatDate(event.timestamp) }}</td>
-              <td class="p-4">
-                <span class="px-2 py-0.5 bg-gray-800 rounded text-xs font-mono text-gray-300">#{{ event.person_id }}</span>
-              </td>
-              <td class="p-4">
-                <span v-if="event.member_name" class="text-blue-400 font-bold">{{ event.member_name }}</span>
-                <span v-else class="text-gray-600">-</span>
-              </td>
-              <td class="p-4">
-                <span class="px-2 py-1 bg-primary/10 text-primary rounded-lg text-xs font-medium border border-primary/20 whitespace-nowrap">
-                  {{ event.action_label }}
-                </span>
-              </td>
-              <td class="p-4">
-                <div class="flex items-center gap-2">
-                  <div class="h-1.5 w-12 bg-gray-800 rounded-full overflow-hidden">
-                    <div class="h-full bg-primary" :style="{ width: `${event.action_confidence * 100}%` }"></div>
-                  </div>
-                  <span class="text-[10px] text-gray-500">{{ (event.action_confidence * 100).toFixed(0) }}%</span>
-                </div>
-              </td>
-              <td class="p-4 text-gray-400 text-xs">{{ event.action_duration ? `${event.action_duration.toFixed(1)}s` : '-' }}</td>
-              <td class="p-4 text-gray-400 text-xs">{{ event.environment?.room || '-' }}</td>
-              <td class="p-4 text-gray-500 text-[10px] font-mono">{{ event.bbox ? event.bbox.join(',') : '-' }}</td>
-              <td class="p-4 text-gray-400 text-xs">{{ event.motion_magnitude ? event.motion_magnitude.toFixed(2) : '-' }}</td>
-            </tr>
-          </tbody>
-        </table>
+    <!-- Content Area -->
+    <div class="flex-1 flex flex-col gap-6 overflow-hidden relative">
+      
+      <!-- Registered Members Section -->
+      <div class="flex-shrink-0 overflow-hidden">
+        <Transition
+          enter-active-class="transition-all duration-300 ease-in-out"
+          enter-from-class="max-h-0 opacity-0 mb-0"
+          enter-to-class="max-h-52 opacity-100 mb-6"
+          leave-active-class="transition-all duration-300 ease-in-out"
+          leave-from-class="max-h-52 opacity-100 mb-6"
+          leave-to-class="max-h-0 opacity-0 mb-0"
+        >
+          <div v-show="isMembersOpen" 
+               @click.self="selectedMemberId = null"
+               class="bg-bgLight/50 backdrop-blur-sm rounded-2xl border border-gray-700 shadow-2xl p-3 overflow-hidden">
+            <div v-if="allMembers.length === 0" class="bg-bgLight/30 border border-dashed border-gray-700 rounded-xl p-8 text-center text-gray-500 h-28 flex items-center justify-center">
+              <p>尚未註冊任何成員</p>
+            </div>
+            <div v-else 
+                 @click.self="selectedMemberId = null"
+                 class="flex gap-4 overflow-x-auto pb-2 custom-scrollbar h-36 items-center px-2">
+              <MemberCard 
+                v-for="member in allMembers" 
+                :key="member.id"
+                :member="member"
+                :is-selected="selectedMemberId === member.id"
+                :format-date-inline="formatDateInline"
+                @select="selectMember"
+                @edit="editMember"
+                @delete="deleteMember"
+              />
+            </div>
+          </div>
+        </Transition>
       </div>
+
+      <!-- Events Table (Main Content) -->
+      <EventsTable 
+        :events="filteredEvents" 
+        :format-date="formatDate" 
+        :selected-member-id="selectedMemberId" 
+      />
     </div>
   </div>
 </template>
@@ -240,5 +293,19 @@ const formatDate = (timestamp) => {
 <style scoped>
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
+}
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #374151;
+  border-radius: 2px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #4B5563;
 }
 </style>
