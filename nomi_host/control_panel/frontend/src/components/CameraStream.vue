@@ -146,10 +146,11 @@ const modes = [
 </script>
 
 <template>
-  <div class="relative group w-full h-full flex items-center justify-center">
-    <div class="relative rounded-xl overflow-hidden shadow-2xl bg-black w-full h-full flex items-center justify-center min-w-[320px] min-h-[240px]">
+  <div class="relative group w-full flex items-center justify-center">
+    <div class="relative rounded-xl overflow-hidden shadow-2xl bg-black w-full flex items-center justify-center min-w-[320px]"
+         :class="{ 'aspect-[4/3]': !imageData }">
       <!-- Image Display -->
-      <img v-if="imageData" :src="imageData" class="w-full h-full object-contain block" />
+      <img v-if="imageData" :src="imageData" class="w-full h-auto block" />
       
       <!-- Placeholder -->
       <div v-else class="w-full h-full flex items-center justify-center text-gray-600 flex-col gap-2 bg-black">

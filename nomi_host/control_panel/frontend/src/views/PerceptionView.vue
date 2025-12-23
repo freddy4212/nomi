@@ -80,12 +80,12 @@ const formatStatus = (statusStr) => {
       <div class="w-[92%] md:w-full max-w-2xl flex flex-col gap-4 md:gap-8 relative">
         
         <!-- Video Container -->
-        <div class="relative group bg-black rounded-xl border border-gray-800 shadow-2xl flex items-center justify-center w-full aspect-[4/3] mx-auto">
+        <div class="relative group bg-black rounded-xl border border-gray-800 shadow-2xl flex items-center justify-center w-full mx-auto">
           <!-- Grid Background -->
           <div class="absolute inset-0 opacity-5 pointer-events-none rounded-xl overflow-hidden" 
                style="background-image: radial-gradient(#374151 1px, transparent 1px); background-size: 20px 20px;"></div>
           
-          <div class="w-full h-full relative z-10 rounded-xl overflow-hidden">
+          <div class="w-full relative z-10 rounded-xl overflow-hidden">
             <CameraStream 
               @frame-update="handleFrameUpdate"
               @status-update="handleStatusUpdate"

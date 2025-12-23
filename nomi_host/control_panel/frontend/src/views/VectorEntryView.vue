@@ -115,12 +115,12 @@ const progressPercent = computed(() => (progress.value / maxProgress.value) * 10
     <div class="inline-flex flex-col gap-6 md:gap-2 w-full max-w-[400px]">
       
       <!-- Top: Camera Feed -->
-      <div class="relative bg-black rounded-xl border border-gray-800 overflow-hidden shadow-lg flex items-center justify-center w-full aspect-[4/3] mx-auto">
+      <div class="relative bg-black rounded-xl border border-gray-800 overflow-hidden shadow-lg flex items-center justify-center w-full mx-auto">
         <!-- Grid Background -->
         <div class="absolute inset-0 opacity-5 pointer-events-none" 
              style="background-image: radial-gradient(#374151 1px, transparent 1px); background-size: 20px 20px;"></div>
         
-        <div class="w-full h-full relative z-10">
+        <div class="w-full relative z-10">
           <CameraStream 
             :show-info-button="false"
             :show-status-indicator="false"
