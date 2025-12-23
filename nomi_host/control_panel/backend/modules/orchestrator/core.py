@@ -115,7 +115,8 @@ class NOMIOrchestrator:
         base_interval_ms = 1000.0 / target_fps
         print(f"[Orchestrator] Target FPS: {target_fps}, Base Interval: {base_interval_ms:.1f}ms")
         
-        self.skeleton_player.reset()
+        # 使用 clear() 而不是 reset()，確保重置 _last_consumed_count 並從頭開始拉取緩存
+        self.skeleton_player.clear()
         
         try:
             while self.view_mode == "interpolated":
@@ -125,15 +126,16 @@ class NOMIOrchestrator:
                     # 使用線性獲取，避免智慧調速造成的卡頓
                     interp_frame = self.skeleton_player.get_next_frame_linear()
                     
-                    if interp_frame:
-                        # 渲染 (降低品質以提高速度)
-                        rendered = DataProcessor.render_frame(
-                            self._last_frame_data, 
-                            interp_frame, 
-                            self.layers.observation_core, 
-                            "interpolated", 
-                            None
-                        )
+                    # 渲染 (如果沒有補幀資料，則退而求其次顯示原始 OSD)
+                    rendered = DataProcessor.render_frame(
+                        self._last_frame_data, 
+                        interp_frame, 
+                        self.layers.observation_core, 
+                        "interpolated" if interp_frame else "overlay", 
+                        None
+                    )
+                    
+                    if rendered is not None:
                         # 這裡我們手動呼叫 encode_image 並指定較低的品質
                         _, buf = cv2.imencode('.jpg', rendered, [cv2.IMWRITE_JPEG_QUALITY, 50])
                         img_b64 = base64.b64encode(buf).decode('utf-8')
