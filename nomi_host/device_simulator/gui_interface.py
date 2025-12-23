@@ -22,7 +22,7 @@ import os
 import sys
 import time
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, ttk
 from typing import Any, Callable, Dict, List, Optional
 
 import cv2
@@ -85,6 +85,13 @@ class SenderGUIInterface:
         self.on_webcam_floating_fps_toggle: Optional[Callable[[bool], None]] = None
         self.on_webcam_random_blocking_toggle: Optional[Callable[[bool], None]] = None
         self.on_webcam_yolo_change: Optional[Callable[[str], bool]] = None
+        self.on_video_start: Optional[Callable[[str], bool]] = None
+        self.on_video_stop: Optional[Callable[[], None]] = None
+        self.on_video_fps_change: Optional[Callable[[float], None]] = None
+        self.on_video_reid_toggle: Optional[Callable[[bool], None]] = None
+        self.on_video_floating_fps_toggle: Optional[Callable[[bool], None]] = None
+        self.on_video_random_blocking_toggle: Optional[Callable[[bool], None]] = None
+        self.on_video_yolo_change: Optional[Callable[[str], bool]] = None
         self.get_serial_ports: Optional[Callable[[], List[str]]] = None
         self.get_camera_options: Optional[Callable[[], List[str]]] = None
         self.get_webcam_preview_frame: Optional[Callable[[], Optional[np.ndarray]]] = None
@@ -148,6 +155,11 @@ class SenderGUIInterface:
         self.tab_webcam = ttk.Frame(self.notebook)
         self.notebook.add(self.tab_webcam, text="📷 Webcam 測試")
         self._setup_webcam_tab()
+        
+        # 分頁 4：Video 影片測試
+        self.tab_video = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_video, text="🎬 Video 影片")
+        self._setup_video_tab()
         
         # 綁定分頁切換事件
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
@@ -429,13 +441,130 @@ class SenderGUIInterface:
         
         self.lbl_webcam_persons = ttk.Label(stats_group, text="偵測人數：0")
         self.lbl_webcam_persons.pack(anchor=tk.W)
+
+    def _setup_video_tab(self):
+        """建立 Video 測試分頁"""
+        main_frame = ttk.Frame(self.tab_video, padding=10)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # 左側：影像預覽
+        left_frame = ttk.Frame(main_frame)
+        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        canvas_frame = ttk.LabelFrame(left_frame, text="影像預覽", padding=5)
+        canvas_frame.pack(fill=tk.BOTH, expand=True)
+        
+        self.video_canvas = tk.Canvas(
+            canvas_frame, 
+            bg="black", 
+            width=config.gui.canvas_width,
+            height=config.gui.canvas_height
+        )
+        self.video_canvas.pack(fill=tk.BOTH, expand=True)
+        self.video_canvas.bind("<Configure>", self._on_video_canvas_resize)
+        
+        # 右側：控制面板
+        right_frame = ttk.Frame(main_frame, width=300)
+        right_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=5)
+        right_frame.pack_propagate(False)
+        
+        # 影片選擇
+        video_group = ttk.LabelFrame(right_frame, text="影片選擇", padding=10)
+        video_group.pack(fill=tk.X, pady=5)
+        
+        self.video_path_var = tk.StringVar(value="")
+        self.lbl_video_path = ttk.Label(video_group, text="未選擇影片", wraplength=250)
+        self.lbl_video_path.pack(fill=tk.X, pady=5)
+        
+        ttk.Button(
+            video_group,
+            text="📁 選擇影片檔案",
+            command=self._on_select_video_file
+        ).pack(fill=tk.X, pady=5)
+        
+        # YOLO 模型選擇
+        yolo_group = ttk.LabelFrame(right_frame, text="YOLO 模型", padding=10)
+        yolo_group.pack(fill=tk.X, pady=5)
+        
+        self.video_yolo_model_var = tk.StringVar(value="yolov8n-pose")
+        
+        radio_frame = ttk.Frame(yolo_group)
+        radio_frame.pack(fill=tk.X, pady=5)
+        
+        ttk.Radiobutton(
+            radio_frame, text="YOLOv8n-Pose", variable=self.video_yolo_model_var,
+            value="yolov8n-pose", command=self._on_video_yolo_model_selected
+        ).pack(side=tk.LEFT, padx=10)
+        
+        ttk.Radiobutton(
+            radio_frame, text="YOLO11n-Pose", variable=self.video_yolo_model_var,
+            value="yolo11n-pose", command=self._on_video_yolo_model_selected
+        ).pack(side=tk.LEFT, padx=10)
+        
+        # FPS 控制
+        fps_group = ttk.LabelFrame(right_frame, text="採樣率設定", padding=10)
+        fps_group.pack(fill=tk.X, pady=5)
+        
+        self.video_fps_label_var = tk.StringVar(value=f"採樣: {config.webcam.default_fps:.0f} FPS")
+        ttk.Label(fps_group, textvariable=self.video_fps_label_var).pack()
+        
+        self.video_fps_var = tk.DoubleVar(value=config.webcam.default_fps)
+        self.video_fps_slider = ttk.Scale(
+            fps_group, from_=config.webcam.min_fps, to=config.webcam.max_fps,
+            variable=self.video_fps_var, orient=tk.HORIZONTAL, command=self._on_video_fps_change
+        )
+        self.video_fps_slider.pack(fill=tk.X, pady=5)
+
+        # 浮動採樣率與隨機阻塞
+        self.video_floating_fps_var = tk.BooleanVar(value=config.webcam.floating_fps)
+        ttk.Checkbutton(
+            fps_group, text="模擬浮動採樣率 (WiseEye2 特性)", variable=self.video_floating_fps_var,
+            command=self._on_video_floating_fps_toggle
+        ).pack(anchor=tk.W, pady=2)
+        
+        self.video_random_blocking_var = tk.BooleanVar(value=config.webcam.random_blocking)
+        ttk.Checkbutton(
+            fps_group, text="模擬隨機阻塞 (網路/處理延遲)", variable=self.video_random_blocking_var,
+            command=self._on_video_random_blocking_toggle
+        ).pack(anchor=tk.W, pady=2)
+        
+        # ReID 控制
+        reid_group = ttk.LabelFrame(right_frame, text="ReID 設定", padding=10)
+        reid_group.pack(fill=tk.X, pady=5)
+        
+        self.video_reid_enabled_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            reid_group, text="啟用 ReID 特徵提取", variable=self.video_reid_enabled_var,
+            command=self._on_video_reid_toggle
+        ).pack(anchor=tk.W)
+        
+        # 控制按鈕
+        control_group = ttk.LabelFrame(right_frame, text="控制", padding=10)
+        control_group.pack(fill=tk.X, pady=5)
+        
+        self.btn_video_start = ttk.Button(
+            control_group, text="▶ 開始播放", command=self._on_video_toggle
+        )
+        self.btn_video_start.pack(fill=tk.X)
+        
+        self.lbl_video_status = ttk.Label(control_group, text="狀態：已停止")
+        self.lbl_video_status.pack(pady=5)
+        
+        # 統計資訊
+        stats_group = ttk.LabelFrame(right_frame, text="統計", padding=10)
+        stats_group.pack(fill=tk.X, pady=5)
+        
+        self.lbl_video_frames = ttk.Label(stats_group, text="處理幀數：0")
+        self.lbl_video_frames.pack(anchor=tk.W)
+        self.lbl_video_fps = ttk.Label(stats_group, text="實際 FPS：0.0")
+        self.lbl_video_fps.pack(anchor=tk.W)
     
     # ===== 事件處理 =====
     
     def _on_tab_changed(self, event):
         """分頁切換事件"""
         selected = self.notebook.index(self.notebook.select())
-        source_map = {0: "wifi", 1: "serial", 2: "webcam"}
+        source_map = {0: "wifi", 1: "serial", 2: "webcam", 3: "video"}
         new_source = source_map.get(selected, "wifi")
         
         if new_source != self.current_source:
@@ -547,6 +676,78 @@ class SenderGUIInterface:
                 self.lbl_yolo_status.config(text=f"✓ 已切換到 {model_name}")
             else:
                 self.lbl_yolo_status.config(text=f"✗ 切換失敗")
+
+    # Video 相關處理
+    def _on_select_video_file(self):
+        """選擇影片檔案"""
+        file_path = filedialog.askopenfilename(
+            title="選擇影片檔案",
+            filetypes=[("影片檔案", "*.mp4 *.avi *.mov *.mkv"), ("所有檔案", "*.*")]
+        )
+        if file_path:
+            self.video_path_var.set(file_path)
+            self.lbl_video_path.config(text=os.path.basename(file_path))
+            self.debug_log(f"Selected video: {file_path}")
+
+    def _on_video_toggle(self):
+        """Video 開始/停止"""
+        if not self.is_sending:
+            video_path = self.video_path_var.get()
+            if not video_path:
+                messagebox.showwarning("警告", "請先選擇影片檔案")
+                return
+            
+            if self.on_video_start and self.on_video_start(video_path):
+                self.is_sending = True
+                self.btn_video_start.config(text="⏹ 停止播放")
+                self.lbl_video_status.config(text="狀態：播放中...", foreground="green")
+                self._update_video_preview()
+        else:
+            if self.on_video_stop:
+                self.on_video_stop()
+            self.is_sending = False
+            self.btn_video_start.config(text="▶ 開始播放")
+            self.lbl_video_status.config(text="狀態：已停止", foreground="gray")
+
+    def _on_video_fps_change(self, val):
+        """Video FPS 滑桿變更"""
+        fps = float(val)
+        self.video_fps_label_var.set(f"採樣: {fps:.0f} FPS")
+        if self.on_video_fps_change:
+            self.on_video_fps_change(fps)
+
+    def _on_video_reid_toggle(self):
+        """Video ReID 開關切換"""
+        enabled = self.video_reid_enabled_var.get()
+        if self.on_video_reid_toggle:
+            self.on_video_reid_toggle(enabled)
+
+    def _on_video_floating_fps_toggle(self):
+        """Video 浮動採樣率開關切換"""
+        enabled = self.video_floating_fps_var.get()
+        if self.on_video_floating_fps_toggle:
+            self.on_video_floating_fps_toggle(enabled)
+
+    def _on_video_random_blocking_toggle(self):
+        """Video 隨機阻塞開關切換"""
+        enabled = self.video_random_blocking_var.get()
+        if self.on_video_random_blocking_toggle:
+            self.on_video_random_blocking_toggle(enabled)
+
+    def _on_video_yolo_model_selected(self):
+        """Video YOLO 模型選擇變更"""
+        model_name = self.video_yolo_model_var.get()
+        if self.on_video_yolo_change:
+            self.on_video_yolo_change(model_name)
+
+    def _on_video_canvas_resize(self, event):
+        """Video 畫布尺寸變更"""
+        self.canvas_w = event.width
+        self.canvas_h = event.height
+
+    def _update_video_preview(self):
+        """更新 Video 預覽"""
+        pass  # 將由主程式實作
     
     def get_preview_mode(self) -> str:
         """獲取預覽模式 - 固定返回 sampled（採樣幀率預覽）"""
@@ -649,6 +850,35 @@ class SenderGUIInterface:
             )
         except Exception as e:
             self.debug_log(f"Preview update error: {e}")
+
+    def update_video_preview(self, frame: np.ndarray, keypoints: List[Any] = None):
+        """更新 Video 預覽畫面"""
+        if frame is None:
+            return
+        
+        try:
+            # 繪製骨架
+            display = frame.copy()
+            if keypoints:
+                self._draw_keypoints(display, keypoints)
+            
+            # 縮放
+            display = self._resize_image(display)
+            
+            # 轉換顯示
+            img_rgb = cv2.cvtColor(display, cv2.COLOR_BGR2RGB)
+            pil_image = Image.fromarray(img_rgb)
+            self.tk_video_image = ImageTk.PhotoImage(pil_image)
+            
+            self.video_canvas.delete("all")
+            self.video_canvas.create_image(
+                self.canvas_w // 2,
+                self.canvas_h // 2,
+                image=self.tk_video_image,
+                anchor=tk.CENTER
+            )
+        except Exception as e:
+            self.debug_log(f"Video preview update error: {e}")
     
     def _draw_keypoints(self, img: np.ndarray, keypoints: List[Any]):
         """繪製骨架關鍵點"""
@@ -726,6 +956,8 @@ class SenderGUIInterface:
             self._on_serial_toggle()
         elif self.current_source == "webcam":
             self._on_webcam_toggle()
+        elif self.current_source == "video":
+            self._on_video_toggle()
     
     def schedule(self, callback, delay_ms: int = 0):
         """排程在主執行緒執行"""

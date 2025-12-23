@@ -12,6 +12,6 @@ device_simulator - WE_MMA_2 發射端程式
 - Webcam: 使用電腦攝像頭 + YOLO 辨識模擬資料
 """
 
-from .main import NOMI Device Simulator_App, main
+from .main import NOMIDeviceSimulatorApp, main
 
-__all__ = ['main', 'NOMI Device Simulator_App']
+__all__ = ['main', 'NOMIDeviceSimulatorApp']

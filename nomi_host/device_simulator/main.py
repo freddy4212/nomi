@@ -27,9 +27,8 @@ from typing import Any, Dict, List, Optional
 import cv2
 import numpy as np
 
-# 抑制 OpenCV 警告 (尤其是 macOS 上的 AVFoundation 警告)
+# 抑制 OpenCV 警告
 os.environ["OPENCV_LOG_LEVEL"] = "ERROR"
-os.environ["OPENCV_VIDEOIO_PRIORITY_BACKEND"] = "AVFOUNDATION"
 
 # 處理直接執行和作為模組執行的情況
 if __name__ == "__main__" or __package__ is None:
@@ -37,12 +36,14 @@ if __name__ == "__main__" or __package__ is None:
     from device_simulator.config import config
     from device_simulator.gui_interface import SenderGUIInterface
     from device_simulator.sources.serial_source import FrameData, SerialSource
+    from device_simulator.sources.video_source import VideoSource
     from device_simulator.sources.webcam_source import WebcamSource
     from device_simulator.sources.wifi_source import WiFiSource
 else:
     from .config import config
     from .gui_interface import SenderGUIInterface
     from .sources.serial_source import FrameData, SerialSource
+    from .sources.video_source import VideoSource
     from .sources.webcam_source import WebcamSource
     from .sources.wifi_source import WiFiSource
 
@@ -178,7 +179,7 @@ class NetworkSender:
         return f"等待連接 {self.receiver_host}:{self.receiver_port}..."
 
 
-class NOMI Device Simulator_App:
+class NOMIDeviceSimulatorApp:
     """
     NOMI Device Simulator 主應用程式類
     
@@ -197,6 +198,7 @@ class NOMI Device Simulator_App:
         # 資料來源
         self.serial_source: Optional[SerialSource] = None
         self.webcam_source: Optional[WebcamSource] = None
+        self.video_source: Optional[VideoSource] = None
         self.wifi_source: Optional[WiFiSource] = None
         
         # 當前來源
@@ -258,6 +260,17 @@ class NOMI Device Simulator_App:
         self.gui.on_webcam_floating_fps_toggle = self._on_webcam_floating_fps_toggle
         self.gui.on_webcam_random_blocking_toggle = self._on_webcam_random_blocking_toggle
         self.gui.on_webcam_yolo_change = self._on_webcam_yolo_change
+        self.gui.get_camera_options = self._get_camera_options
+        
+        # Video
+        self.gui.on_video_start = self._on_video_start
+        self.gui.on_video_stop = self._on_video_stop
+        self.gui.on_video_fps_change = self._on_video_fps_change
+        self.gui.on_video_reid_toggle = self._on_video_reid_toggle
+        self.gui.on_video_floating_fps_toggle = self._on_video_floating_fps_toggle
+        self.gui.on_video_random_blocking_toggle = self._on_video_random_blocking_toggle
+        self.gui.on_video_yolo_change = self._on_video_yolo_change
+        self.gui._update_video_preview = self._update_video_preview
     
     def _on_receiver_connection_changed(self, connected: bool):
         """Receiver 連接狀態變更回調"""
@@ -323,11 +336,11 @@ class NOMI Device Simulator_App:
     
     def _on_webcam_start(self, camera_id: int) -> bool:
         """Webcam 開始"""
-        self.webcam_source = WebcamSource(on_frame_received=self._on_frame_received)
+        if not self.webcam_source:
+            self.webcam_source = WebcamSource(on_frame_received=self._on_frame_received)
         
-        # 偵測攝像頭
-        cameras = self.webcam_source.detect_cameras()
-        options = [f"{c['id']}: {c['resolution']}" for c in cameras]
+        # 偵測攝像頭並更新 GUI 選項
+        options = self._get_camera_options()
         self.gui.set_camera_options(options)
         
         success = self.webcam_source.start(camera_id)
@@ -338,6 +351,14 @@ class NOMI Device Simulator_App:
             self._start_webcam_preview()
         
         return success
+
+    def _get_camera_options(self) -> List[str]:
+        """獲取攝像頭選項列表"""
+        if not self.webcam_source:
+            self.webcam_source = WebcamSource(on_frame_received=self._on_frame_received)
+        
+        cameras = self.webcam_source.detect_cameras()
+        return [f"{c['id']}: {c['resolution']} ({c.get('backend', 'Unknown')})" for c in cameras]
     
     def _on_webcam_stop(self):
         """Webcam 停止"""
@@ -440,6 +461,84 @@ class NOMI Device Simulator_App:
             
             # 繼續更新
             self.webcam_preview_id = self.root.after(33, self._update_webcam_preview)
+
+    # ===== Video 來源 =====
+    
+    def _on_video_start(self, video_path: str) -> bool:
+        """Video 開始"""
+        if not self.video_source:
+            self.video_source = VideoSource(on_frame_received=self._on_frame_received)
+        
+        success = self.video_source.start(video_path)
+        
+        if success:
+            self.debug_log(f"Video started: {video_path}")
+            self._start_video_preview()
+        
+        return success
+    
+    def _on_video_stop(self):
+        """Video 停止"""
+        self._stop_video_preview()
+        if self.video_source:
+            self.video_source.stop()
+        self.debug_log("Video source stopped")
+    
+    def _on_video_fps_change(self, fps: float):
+        """Video FPS 變更"""
+        if self.video_source:
+            self.video_source.set_fps(fps)
+    
+    def _on_video_reid_toggle(self, enabled: bool):
+        """Video ReID 開關變更"""
+        if self.video_source:
+            self.video_source.set_reid_enabled(enabled)
+
+    def _on_video_floating_fps_toggle(self, enabled: bool):
+        """Video 浮動採樣率開關變更"""
+        self.floating_fps_enabled = enabled
+        if self.video_source:
+            self.video_source.set_floating_fps(enabled)
+        self.debug_log(f"Video Floating FPS {'enabled' if enabled else 'disabled'}")
+
+    def _on_video_random_blocking_toggle(self, enabled: bool):
+        """Video 隨機阻塞開關變更"""
+        self.random_blocking_enabled = enabled
+        if self.video_source:
+            self.video_source.set_random_blocking(enabled)
+        self.debug_log(f"Video Random blocking {'enabled' if enabled else 'disabled'}")
+            
+    def _on_video_yolo_change(self, model_name: str) -> bool:
+        """Video YOLO 模型切換"""
+        from device_simulator.yolo import YOLOModel
+        model_map = {"yolov8n-pose": YOLOModel.YOLOV8N, "yolo11n-pose": YOLOModel.YOLO11N}
+        model_type = model_map.get(model_name)
+        if model_type and self.video_source:
+            return self.video_source.switch_yolo_model(model_type)
+        return True
+
+    def _start_video_preview(self):
+        """開始 Video 預覽更新"""
+        self._update_video_preview()
+    
+    def _stop_video_preview(self):
+        """停止 Video 預覽更新"""
+        pass # 由 _update_video_preview 檢查狀態停止
+
+    def _update_video_preview(self):
+        """更新 Video 預覽"""
+        if self.video_source and self.video_source.is_running:
+            frame = self.video_source.get_preview_frame()
+            keypoints = self.video_source.get_preview_keypoints()
+            
+            if frame is not None:
+                self.gui.update_video_preview(frame, keypoints)
+                
+            # 更新統計
+            self.gui.lbl_video_frames.config(text=f"處理幀數：{self.video_source.total_frame_count}")
+            self.gui.lbl_video_fps.config(text=f"實際 FPS：{self.video_source.current_fps:.1f}")
+            
+            self.root.after(33, self._update_video_preview)
         else:
             self.webcam_preview_id = None
     
@@ -622,7 +721,7 @@ def main():
     print("  - 📷 Webcam: 使用電腦攝像頭模擬")
     print()
     
-    app = NOMI Device Simulator_App()
+    app = NOMIDeviceSimulatorApp()
     
     try:
         app.run()
