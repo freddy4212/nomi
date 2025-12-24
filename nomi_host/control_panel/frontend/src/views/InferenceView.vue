@@ -1,58 +1,99 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, defineEmits, computed } from 'vue'
-import { RefreshCw, Brain, Activity, ChevronDown, ChevronUp } from 'lucide-vue-next'
-import ActiveStateCard from '../components/ActiveStateCard.vue'
-import SwimlaneTimeline from '../components/SwimlaneTimeline.vue'
+import { RefreshCw, Brain, Activity, Search, Filter, UserX } from 'lucide-vue-next'
+import MemberInferenceCard from '../components/MemberInferenceCard.vue'
 
 const emit = defineEmits(['status-update'])
 
 const memberStates = ref([])
 const events = ref([])
 const isLoading = ref(false)
-const isTimelineOpen = ref(true)
+const searchQuery = ref('')
 let ws = null
 
-const groupedEvents = computed(() => {
-  const groups = {}
+const groupedData = computed(() => {
+  const registered = {}
+  const unknownEvents = []
+
+  // Use memberStates as the base for registered members
+  memberStates.value.forEach(state => {
+    registered[state.person_id] = {
+      id: state.person_id,
+      name: state.member_name || `Member ${state.person_id}`,
+      lastAction: state.last_action,
+      lastSeen: state.last_seen_time,
+      location: state.last_location,
+      isVisible: state.is_visible,
+      events: []
+    }
+  })
+
+  // Distribute events
   events.value.forEach(event => {
-    // Handle person_id 0 correctly (0 is falsy but valid)
-    const pid = (event.person_id !== undefined && event.person_id !== null) ? event.person_id : 'Unknown'
-    
-    if (!groups[pid]) {
-      groups[pid] = {
+    const pid = event.person_id
+    if (pid === undefined || pid === null || pid === -1) {
+      unknownEvents.push(event)
+      return
+    }
+
+    if (registered[pid]) {
+      registered[pid].events.push(event)
+    } else {
+      // If member not in states but has events, add them
+      registered[pid] = {
         id: pid,
-        name: event.member_name || `Person #${pid}`,
-        events: []
+        name: event.member_name || `Member ${pid}`,
+        lastAction: event.action_label,
+        lastSeen: event.timestamp,
+        location: event.environment?.room,
+        isVisible: false,
+        events: [event]
       }
     }
-    groups[pid].events.push(event)
   })
-  return Object.values(groups).sort((a, b) => String(a.id).localeCompare(String(b.id)))
+
+  const result = Object.values(registered).sort((a: any, b: any) => (b.lastSeen || 0) - (a.lastSeen || 0))
+  
+  // Add Unknown Group at the end if there are unknown events
+  if (unknownEvents.length > 0) {
+    result.push({
+      id: 'unknown',
+      name: '未知訪客 (Unknown)',
+      lastAction: unknownEvents[0].action_label,
+      lastSeen: unknownEvents[0].timestamp,
+      location: unknownEvents[0].environment?.room,
+      events: unknownEvents,
+      isUnknown: true
+    } as any)
+  }
+
+  return result
 })
 
-const toggleTimeline = () => {
-  isTimelineOpen.value = !isTimelineOpen.value
-}
+const filteredData = computed(() => {
+  if (!searchQuery.value) return groupedData.value
+  const query = searchQuery.value.toLowerCase()
+  return groupedData.value.filter((item: any) => 
+    item.name.toLowerCase().includes(query) || 
+    item.id.toString().includes(query) ||
+    item.lastAction?.toLowerCase().includes(query)
+  )
+})
 
 const connectWebSocket = () => {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   const host = window.location.hostname
-  // Use dedicated data channel
   ws = new WebSocket(`${protocol}//${host}:8000/ws/data`)
   
   ws.onopen = () => {
-    console.log('InferenceView WS Connected (Data Channel)')
+    console.log('InferenceView WS Connected')
     fetchData()
   }
   
   ws.onmessage = (event) => {
     try {
       const data = JSON.parse(event.data)
-      
-      // Handle status updates for the footer
-      if (data.meta) {
-        emit('status-update', data.meta)
-      }
+      if (data.meta) emit('status-update', data.meta)
 
       if (data.type === 'db_data') {
         if (data.query === 'member_states') {
@@ -62,11 +103,22 @@ const connectWebSocket = () => {
         }
         isLoading.value = false
       } else if (data.type === 'new_event') {
-        // Smoothly add new event to the top
         events.value.unshift(data.data)
-        // Keep only last 100 events
-        if (events.value.length > 100) {
-          events.value.pop()
+        if (events.value.length > 200) events.value.pop()
+        
+        // Update member state if it exists
+        const pid = data.data.person_id
+        if (pid !== undefined && pid !== null) {
+          const stateIdx = memberStates.value.findIndex(s => s.person_id === pid)
+          if (stateIdx !== -1) {
+            memberStates.value[stateIdx] = {
+              ...memberStates.value[stateIdx],
+              last_action: data.data.action_label,
+              last_seen_time: data.data.timestamp,
+              last_location: data.data.environment?.room,
+              is_visible: true
+            }
+          }
         }
       }
     } catch (e) {
@@ -74,30 +126,24 @@ const connectWebSocket = () => {
     }
   }
 
-  ws.onclose = () => {
-    console.log('InferenceView WS Disconnected')
-    emit('status-update', {
-      tcp_connected: false,
-      memory_connected: false,
-      tcp_active: false,
-      db_active: false,
-      tcp_port: 0,
-      db_port: 0
-    })
-  }
+  ws.onclose = () => console.log('InferenceView WS Disconnected')
 }
 
 const fetchData = () => {
   if (!ws || ws.readyState !== WebSocket.OPEN) return
-  
   isLoading.value = true
   ws.send(JSON.stringify({ type: 'db_query', query: 'member_states' }))
   ws.send(JSON.stringify({ type: 'db_query', query: 'recent_events', limit: 100 }))
 }
 
+const handleInference = (data) => {
+  console.log('Running inference for:', data)
+  // Implementation for inference trigger
+}
+
 onMounted(() => {
   connectWebSocket()
-  const timer = setInterval(fetchData, 5000)
+  const timer = setInterval(fetchData, 10000)
   onUnmounted(() => clearInterval(timer))
 })
 
@@ -110,96 +156,81 @@ const formatDate = (timestamp) => {
   const date = typeof timestamp === 'number' ? new Date(timestamp * 1000) : new Date(timestamp)
   if (isNaN(date.getTime())) return '-'
   return date.toLocaleString('zh-TW', { 
-    year: 'numeric',
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
+    second: '2-digit',
     hour12: false
   }).replace(/\//g, '-').replace(' ', '\n')
 }
 </script>
 
 <template>
-  <div class="h-full flex flex-col p-4 gap-6 overflow-auto">
-    <!-- Header -->
-    <div class="flex items-center justify-between">
-      <div class="flex items-center gap-2">
-        <div class="w-1.5 h-5 bg-secondary rounded-full shadow-[0_0_8px_rgba(168,85,247,0.5)]"></div>
-        <h2 class="text-lg font-bold text-white tracking-tight">推論與狀態 (Inference & States)</h2>
-      </div>
-      
-      <button 
-        @click="fetchData" 
-        class="p-2 text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-all"
-        :class="{'animate-spin text-secondary': isLoading}"
-      >
-        <RefreshCw class="w-5 h-5" />
-      </button>
-    </div>
-
-    <!-- Active States Section -->
-    <section class="space-y-4">
-      <div class="flex items-center gap-2 px-1">
-        <Brain class="w-4 h-4 text-secondary" />
-        <h3 class="text-sm font-bold text-gray-400 uppercase tracking-wider">當前活動狀態</h3>
-      </div>
-      
-      <div v-if="memberStates.length === 0" class="bg-bgLight/30 border border-dashed border-gray-700 rounded-2xl p-12 text-center text-gray-500">
-        <Brain class="w-12 h-12 mx-auto mb-3 opacity-10" />
-        <p>目前無活動中的成員</p>
-      </div>
-      <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        <ActiveStateCard 
-          v-for="state in memberStates" 
-          :key="state.person_id"
-          :state="state"
-          :format-date="formatDate"
-        />
-      </div>
-    </section>
-
-    <!-- Timeline Section -->
-    <section class="space-y-4">
-      <div class="flex items-center justify-between px-1">
-        <div class="flex items-center gap-2">
-          <Activity class="w-4 h-4 text-primary" />
-          <h3 class="text-sm font-bold text-gray-400 uppercase tracking-wider">實時動態 (泳道圖)</h3>
+  <div class="h-full flex flex-col p-4 md:p-6 gap-6 overflow-hidden bg-bgDark">
+    <!-- Header & Search -->
+    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div class="flex items-center gap-3">
+        <div class="w-2 h-6 bg-secondary rounded-full shadow-[0_0_12px_rgba(168,85,247,0.6)]"></div>
+        <div>
+          <h2 class="text-xl font-bold text-white tracking-tight">成員推論與動態</h2>
+          <p class="text-xs text-gray-500 font-medium uppercase tracking-widest">Member Inference & Activity</p>
         </div>
+      </div>
+      
+      <div class="flex items-center gap-3">
+        <div class="relative group">
+          <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 group-focus-within:text-secondary transition-colors" />
+          <input 
+            v-model="searchQuery"
+            type="text" 
+            placeholder="搜尋成員或動作..." 
+            class="bg-bgLight/50 border border-gray-700 rounded-xl py-2 pl-10 pr-4 text-sm text-white focus:outline-none focus:border-secondary/50 focus:ring-1 focus:ring-secondary/20 w-full md:w-64 transition-all"
+          />
+        </div>
+        
         <button 
-          @click="toggleTimeline"
-          class="p-1 text-gray-400 hover:text-white hover:bg-gray-800 rounded transition-colors"
+          @click="fetchData" 
+          class="p-2.5 bg-bgLight/50 text-gray-400 hover:text-white hover:bg-gray-700 border border-gray-700 rounded-xl transition-all shadow-lg"
+          :class="{'animate-spin text-secondary border-secondary/30': isLoading}"
         >
-          <component :is="isTimelineOpen ? ChevronUp : ChevronDown" class="w-4 h-4" />
+          <RefreshCw class="w-5 h-5" />
         </button>
       </div>
+    </div>
 
-      <SwimlaneTimeline 
-        :is-open="isTimelineOpen"
-        :grouped-events="groupedEvents"
-        :events="events"
+    <!-- Member Cards List -->
+    <div class="flex-1 overflow-y-auto pr-1 custom-scrollbar space-y-4 pb-10">
+      <div v-if="filteredData.length === 0 && !isLoading" class="flex flex-col items-center justify-center py-20 text-gray-600">
+        <UserX class="w-16 h-16 mb-4 opacity-20" />
+        <p class="text-lg font-medium">未找到相關成員資料</p>
+        <p class="text-sm opacity-60">請確認系統是否已開始接收數據</p>
+      </div>
+
+      <MemberInferenceCard 
+        v-for="item in filteredData" 
+        :key="item.id"
+        :member="item"
+        :is-unknown-group="item.isUnknown"
         :format-date="formatDate"
+        @run-inference="handleInference"
       />
-    </section>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.scrollbar-hide::-webkit-scrollbar {
-  display: none;
-}
 .custom-scrollbar::-webkit-scrollbar {
-  width: 4px;
-  height: 4px;
+  width: 6px;
 }
 .custom-scrollbar::-webkit-scrollbar-track {
   background: transparent;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: #374151;
-  border-radius: 2px;
+  background: rgba(55, 65, 81, 0.5);
+  border-radius: 3px;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: #4B5563;
+  background: rgba(75, 85, 99, 0.8);
 }
 </style>
