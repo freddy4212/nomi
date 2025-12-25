@@ -8,6 +8,7 @@ import MemoryView from './views/MemoryView.vue'
 import InferenceView from './views/InferenceView.vue'
 import SetupView from './views/SetupView.vue'
 import SettingsView from './views/SettingsView.vue'
+import IoTManagerView from './views/IoTManagerView.vue'
 
 const currentModule = ref('perception')
 const currentTool = ref(null)
@@ -75,6 +76,7 @@ const moduleView = computed(() => {
 // Tool Popup View
 const toolView = computed(() => {
   switch (currentTool.value) {
+    case 'iot': return IoTManagerView
     case 'setup': return SetupView
     case 'settings': return SettingsView
     default: return null
@@ -142,6 +144,7 @@ const closeTool = () => {
         <div class="flex items-center justify-between px-4 py-3 border-b border-gray-700 bg-gray-800/50">
           <span class="font-bold text-lg text-primary">
             {{ 
+              currentTool === 'iot' ? 'IoT裝置管理' :
               currentTool === 'setup' ? '錄入與標定' : 
               currentTool === 'settings' ? '系統設定' : '' 
             }}
@@ -159,6 +162,7 @@ const closeTool = () => {
         <!-- Desktop Bubble Arrow -->
         <div class="hidden md:block absolute -top-2 w-4 h-4 bg-gray-800 border-t border-l border-gray-600 rotate-45 transition-all duration-300"
              :class="{
+               'right-[103px]': currentTool === 'iot',
                'right-[58px]': currentTool === 'setup',
                'right-[13px]': currentTool === 'settings'
              }">

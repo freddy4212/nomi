@@ -3,7 +3,8 @@ import { ref } from 'vue'
 import { 
   Eye, Brain, Cpu, 
   UserSquare2, Settings, 
-  MoreHorizontal, ChevronLeft
+  MoreHorizontal, ChevronLeft,
+  Home
 } from 'lucide-vue-next'
 
 const props = defineProps<{
@@ -20,6 +21,7 @@ const modules = [
 ]
 
 const tools = [
+  { id: 'iot', name: 'IoT裝置管理', icon: Home },
   { id: 'setup', name: '錄入與標定', icon: UserSquare2 },
   { id: 'settings', name: '系統設定', icon: Settings },
 ]

@@ -7,10 +7,12 @@ main.py - NOMI Control Panel Backend 入口
 import asyncio
 import os
 import sys
+from typing import Optional
 
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 # --- 路徑設定 ---
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -128,6 +130,34 @@ async def health_check():
         "video_clients": ws_router.video_manager.connection_count,
         "data_clients": ws_router.data_manager.connection_count
     }
+
+
+# --- IoT 裝置管理 ---
+class DeviceCreate(BaseModel):
+    name: str
+    type: str
+    location: Optional[str] = ""
+    description: Optional[str] = ""
+    icon: Optional[str] = "Cpu"
+
+@app.get("/api/iot/devices")
+async def get_iot_devices():
+    from inference_layer import get_iot_manager
+    iot_manager = get_iot_manager()
+    return iot_manager.get_all_devices()
+
+@app.post("/api/iot/devices")
+async def add_iot_device(device: DeviceCreate):
+    from inference_layer import get_iot_manager
+    iot_manager = get_iot_manager()
+    success = iot_manager.add_device(
+        name=device.name,
+        type=device.type,
+        location=device.location,
+        description=device.description,
+        icon=device.icon
+    )
+    return {"success": success}
 
 
 # --- 主函式 ---

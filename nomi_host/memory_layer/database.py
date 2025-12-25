@@ -151,13 +151,36 @@ class DatabaseManager:
             raise
         finally:
             cursor.close()
+
+    def get_iot_devices(self) -> List[Dict[str, Any]]:
+        """取得所有 IoT 裝置"""
+        try:
+            with self.get_cursor() as cursor:
+                cursor.execute("SELECT * FROM iot_devices ORDER BY device_id ASC")
+                return cursor.fetchall()
+        except Exception as e:
+            self.debug_log(f"Error fetching IoT devices: {e}")
+            return []
+
+    def add_iot_device(self, name: str, type: str, location: str = "", description: str = "", icon: str = "Cpu") -> bool:
+        """新增 IoT 裝置"""
+        try:
+            with self.get_cursor() as cursor:
+                cursor.execute(
+                    "INSERT INTO iot_devices (name, type, location, description, icon) VALUES (%s, %s, %s, %s, %s)",
+                    (name, type, location, description, icon)
+                )
+                return True
+        except Exception as e:
+            self.debug_log(f"Error adding IoT device: {e}")
+            return False
     
     def _init_database(self):
         """初始化資料庫結構"""
         self.debug_log(f"Initializing database: {self.config.database}")
         
         conn = self._get_connection()
-        cursor = conn.cursor()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         
         try:
             # === 啟用擴展 ===
@@ -245,6 +268,48 @@ class DatabaseManager:
                     updated_at TIMESTAMPTZ DEFAULT NOW()
                 )
             ''')
+
+            # === IoT 裝置管理表 ===
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS iot_devices (
+                    device_id SERIAL PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    type TEXT NOT NULL,
+                    status TEXT DEFAULT 'Online',
+                    location TEXT,
+                    description TEXT,
+                    icon TEXT,
+                    metadata JSONB,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            ''')
+
+            # 插入範例資料 (如果表是空的或缺少新裝置)
+            cursor.execute("SELECT COUNT(*) as count FROM iot_devices")
+            current_count = cursor.fetchone()['count']
+            if current_count < 11:
+                # 如果資料不夠，先清空再重新插入完整的範例集 (開發階段方便同步)
+                if current_count > 0:
+                    cursor.execute("TRUNCATE TABLE iot_devices RESTART IDENTITY")
+                
+                sample_devices = [
+                    ('客廳空調', 'Air Conditioner', 'Online', '客廳', '大金變頻空調', 'Wind'),
+                    ('主臥照明', 'Light', 'Online', '主臥室', '智慧調光燈', 'Lightbulb'),
+                    ('廚房冰箱', 'Refrigerator', 'Online', '廚房', '智慧溫控冰箱', 'Refrigerator'),
+                    ('掃地機器人', 'Robot Vacuum', 'Online', '全屋', '石頭掃地機 S8', 'Disc'),
+                    ('電視', 'TV', 'Offline', '客廳', 'Sony 65吋 4K 電視', 'Tv'),
+                    ('智慧音箱', 'Speaker', 'Online', '書房', 'HomePod mini', 'Speaker'),
+                    ('門鎖', 'Door Lock', 'Online', '玄關', '鹿客智慧門鎖', 'Lock'),
+                    ('香氛機', 'Fragrance', 'Online', '客廳', '無印良品超音波芬香噴霧器', 'Waves'),
+                    ('電動窗簾', 'Curtains', 'Online', '主臥室', 'Aqara 智慧窗簾電機', 'Columns'),
+                    ('緊急按鈕', 'Emergency Button', 'Online', '浴室', '無線緊急求助按鈕', 'Bell'),
+                    ('全熱交換機', 'HRV', 'Online', '陽台', '大金全熱交換器', 'Fan')
+                ]
+                cursor.executemany('''
+                    INSERT INTO iot_devices (name, type, status, location, description, icon)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                ''', sample_devices)
             
             # 嘗試新增欄位 (如果表已存在但欄位不存在)
             try:
