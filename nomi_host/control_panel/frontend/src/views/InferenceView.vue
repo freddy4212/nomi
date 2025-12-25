@@ -156,6 +156,7 @@ const formatDate = (timestamp) => {
   const date = typeof timestamp === 'number' ? new Date(timestamp * 1000) : new Date(timestamp)
   if (isNaN(date.getTime())) return '-'
   return date.toLocaleString('zh-TW', { 
+    year: 'numeric',
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',

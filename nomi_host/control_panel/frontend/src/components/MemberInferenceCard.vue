@@ -20,10 +20,31 @@ const emit = defineEmits(['runInference'])
 
 const isExpanded = ref(!props.isUnknownGroup)
 const timelineRef = ref<HTMLElement | null>(null)
-const isSelecting = ref(false)
-const selectionStart = ref<number | null>(null)
-const selectionEnd = ref<number | null>(null)
-const selectionBox = ref({ left: 0, width: 0 })
+
+// Card-based selection state (using IDs for persistence)
+const selectionStartId = ref<string | number | null>(null)
+const selectionEndId = ref<string | number | null>(null)
+
+const selectionIndices = computed(() => {
+  if (selectionStartId.value === null) return null
+  
+  const startIndex = props.member.events.findIndex(e => (e.id || e.timestamp) === selectionStartId.value)
+  if (startIndex === -1) return null
+  
+  if (selectionEndId.value === null) {
+    return { start: startIndex, end: null, min: startIndex, max: startIndex }
+  }
+  
+  const endIndex = props.member.events.findIndex(e => (e.id || e.timestamp) === selectionEndId.value)
+  if (endIndex === -1) return { start: startIndex, end: null, min: startIndex, max: startIndex }
+  
+  return {
+    start: startIndex,
+    end: endIndex,
+    min: Math.min(startIndex, endIndex),
+    max: Math.max(startIndex, endIndex)
+  }
+})
 
 const isMobile = ref(window.innerWidth < 768)
 const handleResize = () => {
@@ -34,76 +55,74 @@ const toggleExpand = () => {
   isExpanded.value = !isExpanded.value
 }
 
-const handleMouseDown = (e: MouseEvent) => {
-  if (!timelineRef.value) return
-  isSelecting.value = true
-  const rect = timelineRef.value.getBoundingClientRect()
-  const x = e.clientX - rect.left + timelineRef.value.scrollLeft
-  selectionStart.value = x
-  selectionEnd.value = x
-  updateSelectionBox()
+const formatDateWithYear = (timestamp: any) => {
+  if (!timestamp) return ''
+  const date = typeof timestamp === 'number' ? new Date(timestamp * 1000) : new Date(timestamp)
+  if (isNaN(date.getTime())) return '-'
+  
+  return date.toLocaleString('zh-TW', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  }).replace(/\//g, '/')
 }
 
-const handleMouseMove = (e: MouseEvent) => {
-  if (!isSelecting.value || !timelineRef.value) return
-  const rect = timelineRef.value.getBoundingClientRect()
-  const x = e.clientX - rect.left + timelineRef.value.scrollLeft
-  selectionEnd.value = x
-  updateSelectionBox()
-}
+const handleEventClick = (index: number) => {
+  const event = props.member.events[index]
+  const eventId = event.id || event.timestamp
 
-const handleMouseUp = () => {
-  if (!isSelecting.value) return
-  isSelecting.value = false
-  // If selection is too small, clear it
-  if (Math.abs((selectionEnd.value || 0) - (selectionStart.value || 0)) < 10) {
-    selectionStart.value = null
-    selectionEnd.value = null
-    selectionBox.value = { left: 0, width: 0 }
+  if (selectionStartId.value === null) {
+    // First selection: set as start
+    selectionStartId.value = eventId
+  } else if (selectionEndId.value === null) {
+    // Second selection: set as end
+    if (eventId === selectionStartId.value) {
+      // Clicked the same card: deselect
+      selectionStartId.value = null
+    } else {
+      selectionEndId.value = eventId
+    }
+  } else {
+    // Third click: reset and start new selection
+    selectionStartId.value = eventId
+    selectionEndId.value = null
   }
-}
-
-const updateSelectionBox = () => {
-  if (selectionStart.value === null || selectionEnd.value === null) return
-  const left = Math.min(selectionStart.value, selectionEnd.value)
-  const width = Math.abs(selectionStart.value - selectionEnd.value)
-  selectionBox.value = { left, width }
 }
 
 const clearSelection = () => {
-  selectionStart.value = null
-  selectionEnd.value = null
-  selectionBox.value = { left: 0, width: 0 }
+  selectionStartId.value = null
+  selectionEndId.value = null
 }
 
 const runInference = () => {
-  if (selectionStart.value === null || selectionEnd.value === null) return
+  if (!selectionIndices.value || selectionIndices.value.end === null) return
   
-  // Find events within the selection
-  // This is a bit tricky because we need to map pixels to time or just find which event cards are overlapped
-  // For now, let's just emit the selection range or a generic signal
+  const startEvent = props.member.events[selectionIndices.value.start]
+  const endEvent = props.member.events[selectionIndices.value.end]
+  
   emit('runInference', {
     memberId: props.member.id,
-    start: selectionStart.value,
-    end: selectionEnd.value
+    startIndex: selectionIndices.value.start,
+    endIndex: selectionIndices.value.end,
+    startTime: startEvent.timestamp,
+    endTime: endEvent.timestamp
   })
-  clearSelection()
 }
 
-// Close selection on click outside
-const handleClickOutside = (e: MouseEvent) => {
-  if (timelineRef.value && !timelineRef.value.contains(e.target as Node)) {
-    // clearSelection()
-  }
+const isEventSelected = (index: number) => {
+  if (!selectionIndices.value) return false
+  return index >= selectionIndices.value.min && index <= selectionIndices.value.max
 }
 
 onMounted(() => {
-  window.addEventListener('mouseup', handleMouseUp)
   window.addEventListener('resize', handleResize)
 })
 
 onUnmounted(() => {
-  window.removeEventListener('mouseup', handleMouseUp)
   window.removeEventListener('resize', handleResize)
 })
 </script>
@@ -139,6 +158,18 @@ onUnmounted(() => {
             <Brain class="w-3 h-3" />
             <span class="truncate">{{ member.lastAction || 'Idle' }}</span>
           </div>
+
+          <!-- Location & Last Seen -->
+          <div class="mt-2 flex flex-col gap-1.5">
+            <div class="flex items-center gap-1.5 px-1.5 py-0.5 rounded bg-white/5 text-[10px] text-gray-400 border border-white/5 w-fit">
+              <MapPin class="w-2.5 h-2.5 text-gray-500" />
+              <span class="truncate max-w-[180px]">{{ member.location || '未知' }}</span>
+            </div>
+            <div class="flex items-center gap-1.5 px-1.5 py-0.5 rounded bg-white/5 text-[10px] text-gray-400 border border-white/5 w-fit">
+              <Clock class="w-2.5 h-2.5 text-gray-500" />
+              <span>{{ member.lastSeen ? formatDateWithYear(member.lastSeen) : '無紀錄' }}</span>
+            </div>
+          </div>
         </div>
 
         <!-- Mobile Expand Icon -->
@@ -160,22 +191,26 @@ onUnmounted(() => {
               <Clock class="w-3 h-3" />
               <span>Timeline</span>
             </div>
-            <div v-if="member.location" class="flex items-center gap-1">
-              <MapPin class="w-3 h-3" />
-              <span>{{ member.location }}</span>
-            </div>
           </div>
           
-          <div v-if="selectionBox.width > 0" class="flex items-center gap-2">
+          <div v-if="selectionStartId !== null" class="flex items-center gap-2 animate-in fade-in slide-in-from-right-4 duration-300">
+            <button 
+              @click.stop="clearSelection"
+              class="px-2 py-1 text-[10px] font-bold text-gray-500 hover:text-white transition-colors flex items-center gap-1"
+            >
+              <X class="w-3 h-3" />
+              取消
+            </button>
             <button 
               @click.stop="runInference"
-              class="px-3 py-1 bg-secondary hover:bg-secondary/80 text-white text-[10px] font-bold rounded-full transition-all shadow-[0_0_10px_rgba(168,85,247,0.3)] flex items-center gap-1"
+              :disabled="selectionEndId === null"
+              class="px-3 py-1 text-[10px] font-bold rounded-full transition-all flex items-center gap-1"
+              :class="selectionEndId !== null 
+                ? 'bg-secondary text-white hover:bg-secondary/80 shadow-[0_0_10px_rgba(168,85,247,0.3)]' 
+                : 'bg-gray-700 text-gray-500 cursor-not-allowed'"
             >
               <Brain class="w-3 h-3" />
               執行推論
-            </button>
-            <button @click.stop="clearSelection" class="text-gray-500 hover:text-white">
-              <X class="w-3 h-3" />
             </button>
           </div>
         </div>
@@ -184,16 +219,7 @@ onUnmounted(() => {
         <div 
           ref="timelineRef"
           class="h-24 md:h-auto flex-1 overflow-x-auto overflow-y-hidden p-4 flex gap-3 items-center custom-scrollbar relative select-none"
-          @mousedown="handleMouseDown"
-          @mousemove="handleMouseMove"
         >
-          <!-- Selection Overlay -->
-          <div 
-            v-if="selectionBox.width > 0"
-            class="absolute top-0 bottom-0 bg-secondary/20 border-x border-secondary/50 z-10 pointer-events-none"
-            :style="{ left: selectionBox.left + 'px', width: selectionBox.width + 'px' }"
-          ></div>
-
           <div v-if="member.events.length === 0" class="text-gray-600 text-xs italic px-4">
             No recent activity
           </div>
@@ -201,13 +227,29 @@ onUnmounted(() => {
           <div 
             v-for="(event, index) in member.events" 
             :key="event.id || index" 
-            class="flex-shrink-0 relative group/event"
+            @click="handleEventClick(index)"
+            class="flex-shrink-0 relative group/event cursor-pointer"
           >
             <!-- Connector Line -->
             <div v-if="index !== member.events.length - 1" class="absolute top-1/2 -right-3 w-3 h-0.5 bg-gray-700/50"></div>
             
             <!-- Event Card -->
-            <div class="w-36 bg-gray-800/50 hover:bg-gray-700/50 border border-gray-700/50 hover:border-secondary/30 rounded-xl p-2 transition-all cursor-default">
+            <div 
+              class="w-36 bg-gray-800/50 border rounded-xl p-2 transition-all relative"
+              :class="[
+                isEventSelected(index)
+                  ? 'border-secondary bg-secondary/10 shadow-[0_0_15px_rgba(168,85,247,0.2)] z-10'
+                  : 'border-gray-700/50 hover:border-secondary/30 hover:bg-gray-700/50'
+              ]"
+            >
+              <!-- Selection Indicators -->
+              <div v-if="selectionStartId === (event.id || event.timestamp)" class="absolute -top-2 -left-1 bg-secondary text-white text-[8px] font-bold px-1 rounded shadow-lg z-20">
+                START
+              </div>
+              <div v-if="selectionEndId === (event.id || event.timestamp)" class="absolute -top-2 -right-1 bg-secondary text-white text-[8px] font-bold px-1 rounded shadow-lg z-20">
+                END
+              </div>
+
               <div class="flex justify-between items-center mb-1">
                 <span class="text-[9px] font-mono text-gray-500 whitespace-pre-line leading-tight">{{ formatDate(event.timestamp) }}</span>
                 <span class="text-[9px] px-1.5 py-0.5 rounded bg-secondary/10 text-secondary border border-secondary/20">{{ event.action_label }}</span>
