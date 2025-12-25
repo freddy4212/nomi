@@ -95,18 +95,9 @@ const selectTool = (id) => {
     </div>
 
     <!-- Desktop Left / Mobile Center: Logo -->
-    <div class="flex items-center gap-3 md:w-1/4 justify-center md:justify-start">
-      <!-- Square Kitten Logo -->
-      <div class="w-7 h-7 bg-gradient-to-br from-primary to-blue-600 rounded-lg flex flex-col items-center justify-center shadow-lg shadow-primary/20 relative overflow-hidden">
-        <!-- Eyes -->
-        <div class="flex gap-1 mb-0.5">
-          <div class="w-0.5 h-1.5 bg-bgDark rounded-full"></div>
-          <div class="w-0.5 h-1.5 bg-bgDark rounded-full"></div>
-        </div>
-        <!-- Mouth -->
-        <div class="w-0 h-0 border-l-[2.5px] border-l-transparent border-r-[2.5px] border-r-transparent border-t-[3.5px] border-t-bgDark"></div>
-      </div>
-      <span class="font-bold text-xl tracking-wider bg-clip-text text-transparent bg-gradient-to-r from-white to-gray-400">NOMI Agent</span>
+    <div class="flex items-center gap-3 md:w-1/4 justify-center md:justify-start md:pl-2">
+      <!-- NOMI Logo -->
+      <img src="/logo.svg" alt="NOMI Logo" class="h-10 md:h-12 w-auto" />
     </div>
 
     <!-- Desktop Center: Modules -->
