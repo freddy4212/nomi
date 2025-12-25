@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, defineEmits, defineProps } from 'vue'
+import { ref, onMounted, onUnmounted, defineEmits, defineProps, computed } from 'vue'
 import { Activity, Info, Settings2 } from 'lucide-vue-next'
 
 const props = defineProps({
@@ -21,12 +21,25 @@ const emit = defineEmits(['frame-update', 'status-update', 'toggle-info'])
 
 const imageData = ref(null)
 const isConnected = ref(false)
+const tcpConnected = ref(false)
 const fps = ref(0)
 const viewMode = ref('overlay')
 const showMenu = ref(false)
+const lastFrameTime = ref(0)
+const currentTime = ref(Date.now())
+
 let ws = null
 let dataWs = null
 let menuTimer = null
+let statusTimer = null
+
+const statusColor = computed(() => {
+  if (!isConnected.value || !tcpConnected.value) return 'bg-red-500 text-red-500'
+  
+  const diff = currentTime.value - lastFrameTime.value
+  // 有影像輸入且延遲在 1 秒內視為正常綠燈，否則視為無影像輸入紅燈
+  return diff < 1000 ? 'bg-green-500 text-green-500' : 'bg-red-500 text-red-500'
+})
 
 const toggleMenu = (event) => {
   if (!props.allowModeSwitch) return
@@ -72,10 +85,12 @@ const connectWebSocket = () => {
         if (data.meta) {
           emit('status-update', data.meta)
           if (data.meta.fps !== undefined) fps.value = data.meta.fps
+          if (data.meta.tcp_connected !== undefined) tcpConnected.value = data.meta.tcp_connected
         }
       }
 
       if (data.type === 'frame_update') {
+        lastFrameTime.value = Date.now()
         if (data.image) {
           imageData.value = `data:image/jpeg;base64,${data.image}`
         }
@@ -128,6 +143,9 @@ const setViewMode = (mode) => {
 onMounted(() => {
   connectWebSocket()
   window.addEventListener('click', closeMenu)
+  statusTimer = setInterval(() => {
+    currentTime.value = Date.now()
+  }, 200)
 })
 
 onUnmounted(() => {
@@ -135,6 +153,7 @@ onUnmounted(() => {
   if (dataWs) dataWs.close()
   window.removeEventListener('click', closeMenu)
   if (menuTimer) clearTimeout(menuTimer)
+  if (statusTimer) clearInterval(statusTimer)
 })
 
 const modes = [
@@ -170,10 +189,7 @@ const modes = [
       <!-- Status Indicator (Minimal) -->
       <div v-if="showStatusIndicator" class="absolute top-3 left-3 flex items-center gap-2">
           <span class="w-2 h-2 rounded-full shadow-[0_0_8px_currentColor] transition-all duration-500" 
-                :class="[
-                  !isConnected ? 'bg-red-500 text-red-500' : 
-                  fps > 0 ? 'bg-green-500 text-green-500 scale-110 animate-pulse' : 'bg-blue-500 text-blue-500'
-                ]"></span>
+                :class="statusColor"></span>
       </div>
 
       <!-- View Mode Selector -->
@@ -201,11 +217,11 @@ const modes = [
       </Transition>
     </div>
 
-    <!-- Mobile Info Toggle (Inside Video Area) -->
+    <!-- Info Toggle (Inside Video Area) -->
     <button 
       v-if="showInfoButton"
       @click.stop="emit('toggle-info')"
-      class="md:hidden absolute bottom-3 right-3 w-8 h-8 backdrop-blur-md rounded-full shadow-lg flex items-center justify-center z-20 transition-all border bg-white/10 text-white/80 border-white/20 hover:bg-gray-900 hover:text-white hover:border-gray-600"
+      class="absolute bottom-3 right-3 w-8 h-8 backdrop-blur-md rounded-full shadow-lg flex items-center justify-center z-20 transition-all border bg-white/10 text-white/80 border-white/20 hover:bg-gray-900 hover:text-white hover:border-gray-600"
     >
       <Info class="w-4 h-4" />
     </button>

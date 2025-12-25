@@ -17,6 +17,7 @@ const bufferStatus = ref({})
 const personCount = ref(0)
 const persons = ref([])
 const showMobileInfo = ref(false)
+const showDesktopInfo = ref(true)
 
 // Mobile Info Carousel State
 const activeCardIndex = ref(0)
@@ -89,7 +90,10 @@ const formatStatus = (statusStr) => {
             <CameraStream 
               @frame-update="handleFrameUpdate"
               @status-update="handleStatusUpdate"
-              @toggle-info="showMobileInfo = !showMobileInfo"
+              @toggle-info="() => {
+                showMobileInfo = !showMobileInfo;
+                showDesktopInfo = !showDesktopInfo;
+              }"
             />
           </div>
 
@@ -186,54 +190,63 @@ const formatStatus = (statusStr) => {
         </div>
 
         <!-- Desktop Info Cards (Below Video) -->
-      <div class="hidden md:grid grid-cols-3 gap-6 shrink-0 w-full">
-        <!-- Card 1: Device Info -->
-        <div class="bg-bgLight rounded-2xl p-5 border border-gray-700 flex flex-col shadow-lg">
-          <div class="text-gray-400 text-xs uppercase tracking-wider flex items-center gap-2 mb-3">
-            <Monitor class="w-4 h-4" /> Device Info
-          </div>
-          <div class="flex flex-col justify-center">
-            <div class="text-2xl font-bold text-white truncate leading-tight mb-2" :title="deviceId">{{ deviceId }}</div>
-            <div class="text-xs text-gray-500 font-mono space-y-1.5">
-               <div class="flex justify-between items-center"><span>Version:</span> <span class="text-gray-300">{{ deviceVersion }}</span></div>
-               <div class="flex justify-between items-center"><span>Model:</span> <span class="text-gray-300">{{ deviceModel }}</span></div>
+        <Transition
+          enter-active-class="transition duration-300 ease-out"
+          enter-from-class="opacity-0 -translate-y-4"
+          enter-to-class="opacity-100 translate-y-0"
+          leave-active-class="transition duration-200 ease-in"
+          leave-from-class="opacity-100 translate-y-0"
+          leave-to-class="opacity-0 -translate-y-4"
+        >
+          <div v-if="showDesktopInfo" class="hidden md:grid grid-cols-3 gap-6 shrink-0 w-full">
+            <!-- Card 1: Device Info -->
+            <div class="bg-bgLight rounded-2xl p-5 border border-gray-700 flex flex-col shadow-lg">
+              <div class="text-gray-400 text-xs uppercase tracking-wider flex items-center gap-2 mb-3">
+                <Monitor class="w-4 h-4" /> Device Info
+              </div>
+              <div class="flex flex-col justify-center">
+                <div class="text-2xl font-bold text-white truncate leading-tight mb-2" :title="deviceId">{{ deviceId }}</div>
+                <div class="text-xs text-gray-500 font-mono space-y-1.5">
+                  <div class="flex justify-between items-center"><span>Version:</span> <span class="text-gray-300">{{ deviceVersion }}</span></div>
+                  <div class="flex justify-between items-center"><span>Model:</span> <span class="text-gray-300">{{ deviceModel }}</span></div>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
 
-        <!-- Card 2: Frame Info -->
-        <div class="bg-bgLight rounded-2xl p-5 border border-gray-700 flex flex-col shadow-lg">
-          <div class="text-gray-400 text-xs uppercase tracking-wider flex items-center gap-2 mb-3">
-            <Layers class="w-4 h-4" /> Frame Info
-          </div>
-          <div class="flex flex-col justify-center">
-            <div class="flex items-baseline gap-1.5 mb-2">
-              <div class="text-2xl font-bold text-primary leading-tight">{{ fps }}</div>
-              <div class="text-xs text-gray-500 font-bold">FPS</div>
+            <!-- Card 2: Frame Info -->
+            <div class="bg-bgLight rounded-2xl p-5 border border-gray-700 flex flex-col shadow-lg">
+              <div class="text-gray-400 text-xs uppercase tracking-wider flex items-center gap-2 mb-3">
+                <Layers class="w-4 h-4" /> Frame Info
+              </div>
+              <div class="flex flex-col justify-center">
+                <div class="flex items-baseline gap-1.5 mb-2">
+                  <div class="text-2xl font-bold text-primary leading-tight">{{ fps }}</div>
+                  <div class="text-xs text-gray-500 font-bold">FPS</div>
+                </div>
+                <div class="text-xs text-gray-500 font-mono space-y-1.5">
+                  <div class="flex justify-between items-center"><span>Tick:</span> <span class="text-gray-300">{{ algoTick }}</span></div>
+                  <div class="flex justify-between items-center"><span>Frame No:</span> <span class="text-gray-300">{{ frameNo }}</span></div>
+                </div>
+              </div>
             </div>
-            <div class="text-xs text-gray-500 font-mono space-y-1.5">
-              <div class="flex justify-between items-center"><span>Tick:</span> <span class="text-gray-300">{{ algoTick }}</span></div>
-              <div class="flex justify-between items-center"><span>Frame No:</span> <span class="text-gray-300">{{ frameNo }}</span></div>
-            </div>
-          </div>
-        </div>
 
-        <!-- Card 3: Interpolation -->
-        <div class="bg-bgLight rounded-2xl p-5 border border-gray-700 flex flex-col shadow-lg">
-          <div class="text-gray-400 text-xs uppercase tracking-wider flex items-center gap-2 mb-3">
-            <Activity class="w-4 h-4" /> Interpolation
-          </div>
-          <div class="flex flex-col justify-center">
-            <div class="text-2xl font-bold leading-tight mb-2" :class="bufferStatus.sequence_ready ? 'text-secondary' : 'text-yellow-500'">
-              {{ bufferStatus.sequence_ready ? 'Ready' : 'Buffering...' }}
+            <!-- Card 3: Interpolation -->
+            <div class="bg-bgLight rounded-2xl p-5 border border-gray-700 flex flex-col shadow-lg">
+              <div class="text-gray-400 text-xs uppercase tracking-wider flex items-center gap-2 mb-3">
+                <Activity class="w-4 h-4" /> Interpolation
+              </div>
+              <div class="flex flex-col justify-center">
+                <div class="text-2xl font-bold leading-tight mb-2" :class="bufferStatus.sequence_ready ? 'text-secondary' : 'text-yellow-500'">
+                  {{ bufferStatus.sequence_ready ? 'Ready' : 'Buffering...' }}
+                </div>
+                <div class="text-xs text-gray-500 font-mono space-y-1.5">
+                  <div class="flex justify-between items-center"><span>Raw Frame:</span> <span class="text-gray-300">{{ bufferStatus.raw_frames || 0 }}</span></div>
+                  <div class="flex justify-between items-center"><span>Buffed Frame:</span> <span class="text-gray-300">{{ bufferStatus.interpolated_frames || 0 }}</span></div>
+                </div>
+              </div>
             </div>
-            <div class="text-xs text-gray-500 font-mono space-y-1.5">
-              <div class="flex justify-between items-center"><span>Raw Frame:</span> <span class="text-gray-300">{{ bufferStatus.raw_frames || 0 }}</span></div>
-              <div class="flex justify-between items-center"><span>Buffed Frame:</span> <span class="text-gray-300">{{ bufferStatus.interpolated_frames || 0 }}</span></div>
-            </div>
           </div>
-        </div>
-      </div>
+        </Transition>
     </div>
   </div>
 

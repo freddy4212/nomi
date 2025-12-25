@@ -109,10 +109,10 @@ const progressPercent = computed(() => (progress.value / maxProgress.value) * 10
 </script>
 
 <template>
-  <div class="h-full flex flex-col items-center justify-center p-1 overflow-auto">
+  <div class="flex flex-col items-center justify-center p-0 overflow-auto">
     
     <!-- Main Container -->
-    <div class="inline-flex flex-col gap-6 md:gap-2 w-full max-w-[400px]">
+    <div class="inline-flex flex-col gap-2 w-full max-w-[400px]">
       
       <!-- Top: Camera Feed -->
       <div class="relative bg-black rounded-xl border border-gray-800 overflow-hidden shadow-lg flex items-center justify-center w-full mx-auto">

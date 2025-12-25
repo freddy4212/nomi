@@ -2,7 +2,7 @@
 import { ref } from 'vue'
 import { 
   Eye, Brain, Cpu, 
-  UserPlus, Box, Settings, 
+  UserSquare2, Settings, 
   MoreHorizontal, ChevronLeft
 } from 'lucide-vue-next'
 
@@ -20,8 +20,7 @@ const modules = [
 ]
 
 const tools = [
-  { id: 'vector-entry', name: '向量錄入', icon: UserPlus },
-  { id: 'space-calibration', name: '空間標定', icon: Box },
+  { id: 'setup', name: '錄入與標定', icon: UserSquare2 },
   { id: 'settings', name: '系統設定', icon: Settings },
 ]
 
@@ -50,7 +49,7 @@ const selectTool = (id) => {
 </script>
 
 <template>
-  <nav @click="selectTool(null)" class="bg-bgLight border-b border-gray-700 h-[72px] flex items-center justify-between px-5 relative z-50 shadow-md cursor-default">
+  <nav @click="selectTool(null)" class="bg-bgLight border-b border-gray-700 h-[72px] flex items-center justify-between px-5 relative z-[60] shadow-md cursor-default">
     
     <!-- Click Outside Overlay -->
     <div v-if="isMobileModuleOpen || isMobileToolOpen" 
