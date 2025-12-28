@@ -27,3 +27,4 @@ EPII_CM55M_APP_S/prebuilt_libs/**
 .pio
 .pycache
 node_modules
+.env

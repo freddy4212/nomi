@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, defineEmits, computed } from 'vue'
-import { RefreshCw, Brain, Activity, Search, Filter, UserX } from 'lucide-vue-next'
+import { RefreshCw, Brain, Activity, Search, Filter, UserX, X, Info } from 'lucide-vue-next'
 import MemberInferenceCard from '../components/MemberInferenceCard.vue'
 
 const emit = defineEmits(['status-update'])
@@ -136,9 +136,63 @@ const fetchData = () => {
   ws.send(JSON.stringify({ type: 'db_query', query: 'recent_events', limit: 100 }))
 }
 
-const handleInference = (data) => {
+const showResultModal = ref(false)
+const analysisResult = ref<any>(null)
+const isAnalyzing = ref(false)
+
+const handleInference = async (data: any) => {
   console.log('Running inference for:', data)
-  // Implementation for inference trigger
+  isAnalyzing.value = true
+  showResultModal.value = true
+  analysisResult.value = null
+  
+  try {
+    // Helper to get timestamp in seconds
+    const getSeconds = (ts: any) => {
+      if (!ts) return 0
+      if (typeof ts === 'number') return ts
+      
+      // Try parsing as ISO string or other date formats
+      const d = new Date(ts)
+      if (!isNaN(d.getTime())) return d.getTime() / 1000
+      
+      // If it's a string that looks like a number, convert it
+      const n = parseFloat(ts)
+      if (!isNaN(n)) return n
+      
+      return 0
+    }
+
+    let start = getSeconds(data.startTime)
+    let end = getSeconds(data.endTime)
+    
+    // Handle unknown member ID
+    const memberId = data.memberId === 'unknown' ? 0 : parseInt(data.memberId)
+    
+    const response = await fetch(`http://${window.location.hostname}:8000/api/inference/analyze`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        member_id: memberId,
+        start_time: start,
+        end_time: end
+      })
+    })
+    
+    const result = await response.json()
+    analysisResult.value = result
+  } catch (e: any) {
+    console.error('Inference failed', e)
+    analysisResult.value = { error: '推論請求失敗: ' + e.message }
+  } finally {
+    isAnalyzing.value = false
+  }
+}
+
+const closeResultModal = () => {
+  showResultModal.value = false
 }
 
 onMounted(() => {
@@ -216,6 +270,70 @@ const formatDate = (timestamp) => {
         :format-date="formatDate"
         @run-inference="handleInference"
       />
+    </div>
+
+    <!-- Analysis Result Modal -->
+    <div v-if="showResultModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" @click="closeResultModal">
+      <div class="bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[80vh]" @click.stop>
+        <!-- Header -->
+        <div class="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-800/50">
+          <div class="flex items-center gap-2">
+            <Brain class="w-5 h-5 text-secondary" />
+            <h3 class="font-bold text-white">行為分析報告</h3>
+          </div>
+          <button @click="closeResultModal" class="text-gray-400 hover:text-white transition-colors">
+            <X class="w-5 h-5" />
+          </button>
+        </div>
+        
+        <!-- Content -->
+        <div class="p-6 overflow-y-auto custom-scrollbar">
+          <div v-if="isAnalyzing" class="flex flex-col items-center justify-center py-12 gap-4">
+            <div class="w-12 h-12 border-4 border-secondary/30 border-t-secondary rounded-full animate-spin"></div>
+            <p class="text-gray-400 animate-pulse">正在分析行為數據...</p>
+          </div>
+          
+          <div v-else-if="analysisResult" class="space-y-6">
+            <div v-if="analysisResult.error" class="p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 flex items-center gap-3">
+              <Info class="w-5 h-5 flex-shrink-0" />
+              <p>{{ analysisResult.error }}</p>
+            </div>
+            
+            <div v-else>
+              <div class="flex items-center justify-between mb-6">
+                <div>
+                  <h4 class="text-2xl font-bold text-white mb-1">{{ analysisResult.member_name }}</h4>
+                  <p class="text-sm text-gray-500">分析事件數: {{ analysisResult.event_count }}</p>
+                </div>
+                <div class="text-right text-xs text-gray-500 font-mono">
+                  <p>Start: {{ analysisResult.period?.start }}</p>
+                  <p>End: {{ analysisResult.period?.end }}</p>
+                </div>
+              </div>
+              
+              <div class="bg-white/5 rounded-xl p-6 border border-white/10">
+                <h5 class="text-sm font-bold text-gray-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                  <Activity class="w-4 h-4" />
+                  Summary
+                </h5>
+                <div class="prose prose-invert max-w-none">
+                  <p class="text-gray-200 leading-relaxed whitespace-pre-line">{{ analysisResult.summary }}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Footer -->
+        <div class="p-4 border-t border-gray-700 bg-gray-800/30 flex justify-end">
+          <button 
+            @click="closeResultModal"
+            class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors text-sm font-medium"
+          >
+            關閉
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </template>

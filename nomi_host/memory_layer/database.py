@@ -567,6 +567,57 @@ class DatabaseManager:
                                (duration_sec, limit))
             
             return cursor.fetchall()
+
+    def get_events_in_range(
+        self,
+        member_id: int,
+        start_time: float,
+        end_time: float
+    ) -> List[Dict[str, Any]]:
+        """
+        查詢指定成員在特定時間範圍內的事件
+        
+        Args:
+            member_id: 成員 ID
+            start_time: 開始時間戳 (Unix Timestamp)
+            end_time: 結束時間戳 (Unix Timestamp)
+            
+        Returns:
+            事件列表
+        """
+        if not self._connected:
+            return []
+            
+        with self.get_cursor() as cursor:
+            # Debug: Check what's in the DB for this member
+            cursor.execute("SELECT COUNT(*) FROM unified_telemetry WHERE matched_member_id = %s", (member_id,))
+            total_count = cursor.fetchone()[0] if member_id != 0 else 0
+            
+            if member_id == 0:
+                # 查詢未知訪客 (matched_member_id 為 NULL)
+                cursor.execute('''
+                    SELECT t.*, '未知訪客' as member_name
+                    FROM unified_telemetry t
+                    WHERE t.matched_member_id IS NULL
+                    AND t.timestamp >= to_timestamp(%s) - interval '1 second'
+                    AND t.timestamp <= to_timestamp(%s) + interval '1 second'
+                    ORDER BY t.timestamp ASC
+                ''', (start_time, end_time))
+            else:
+                # 這裡使用 person_id 查詢，因為前端傳入的是 tracker 分配的 person_id
+                cursor.execute('''
+                    SELECT t.*, m.name as member_name
+                    FROM unified_telemetry t
+                    LEFT JOIN member_registry m ON t.matched_member_id = m.member_id
+                    WHERE t.person_id = %s
+                    AND t.timestamp >= to_timestamp(%s) - interval '1 second'
+                    AND t.timestamp <= to_timestamp(%s) + interval '1 second'
+                    ORDER BY t.timestamp ASC
+                ''', (member_id, start_time, end_time))
+            
+            results = cursor.fetchall()
+            print(f"[Database] Range query for member {member_id}: {len(results)} results (Total in DB for member: {total_count})")
+            return results
     
     def get_statistics(self) -> Dict[str, Any]:
         """
