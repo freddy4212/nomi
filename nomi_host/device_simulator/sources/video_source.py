@@ -30,6 +30,96 @@ from device_simulator.sources.webcam_source import FrameData
 from device_simulator.yolo import PoseExtractor, YOLOModel
 
 
+class IdentityManager:
+    """ReID 身份管理器 (Gallery Mode)"""
+    def __init__(self, threshold=0.5, max_gallery_size=10):
+        self.threshold = threshold
+        self.max_gallery_size = max_gallery_size
+        self.identities = {}  # global_id -> List[feature_vector]
+        self.track_map = {}   # current_track_id -> global_id
+        self.next_id = 1
+
+    def resolve_ids(self, track_ids: List[int], reid_features: List[List[float]]) -> List[int]:
+        resolved_ids = []
+        # 確保長度一致
+        if len(reid_features) < len(track_ids):
+            reid_features.extend([[]] * (len(track_ids) - len(reid_features)))
+            
+        for tid, feat in zip(track_ids, reid_features):
+            resolved_ids.append(self._get_id(tid, feat))
+        return resolved_ids
+
+    def _get_id(self, track_id: int, feature: List[float]) -> int:
+        # 預處理特徵
+        feat_vec = None
+        if feature and len(feature) > 0:
+            arr = np.array(feature)
+            norm = np.linalg.norm(arr)
+            if norm > 0:
+                feat_vec = arr / norm
+
+        # 1. 檢查是否已有此 track_id 的映射 (YOLO 追蹤延續)
+        if track_id in self.track_map:
+            gid = self.track_map[track_id]
+            if feat_vec is not None:
+                self._update_gallery(gid, feat_vec)
+            return gid
+
+        # 2. 新的 track_id，嘗試透過 ReID 找回舊身份
+        if feat_vec is None:
+            # 沒有特徵，只能分配新 ID
+            return self._create_new_id(track_id, "No Feature")
+
+        # 搜尋最相似的身份 (Gallery Search)
+        best_id = -1
+        best_score = -1
+        
+        for gid, gallery in self.identities.items():
+            if not gallery:
+                continue
+            # 計算與 Gallery 中所有特徵的相似度，取最大值
+            scores = [np.dot(feat_vec, g_feat) for g_feat in gallery]
+            max_s = max(scores) if scores else -1
+            
+            if max_s > best_score:
+                best_score = max_s
+                best_id = gid
+        
+        if best_score > self.threshold:
+            # 找到匹配
+            self.track_map[track_id] = best_id
+            self._update_gallery(best_id, feat_vec)
+            print(f"[IdentityManager] Matched Track {track_id} -> ID {best_id} (Score: {best_score:.2f})")
+            return best_id
+        else:
+            # 無匹配，建立新身份
+            gid = self._create_new_id(track_id, f"Score: {best_score:.2f} < {self.threshold}")
+            self._update_gallery(gid, feat_vec)
+            return gid
+
+    def _create_new_id(self, track_id: int, reason: str) -> int:
+        gid = self.next_id
+        self.next_id += 1
+        self.track_map[track_id] = gid
+        self.identities[gid] = []
+        print(f"[IdentityManager] New ID {gid} ({reason}) for Track {track_id}")
+        return gid
+
+    def _update_gallery(self, gid: int, feat_vec: np.ndarray):
+        if gid not in self.identities:
+            self.identities[gid] = []
+        
+        gallery = self.identities[gid]
+        gallery.append(feat_vec)
+        # 保持 Gallery 大小
+        if len(gallery) > self.max_gallery_size:
+            gallery.pop(0)
+
+    def clear_track_map(self):
+        """清除 track 映射 (保留身份資料)"""
+        self.track_map.clear()
+
+
 class VideoSource:
     """Video 影片檔案資料來源（模擬 WiseEye2 tflm_yolov8n_pose_reid）"""
     
@@ -51,6 +141,7 @@ class VideoSource:
         # ReID 特徵提取器
         self.reid_extractor: Optional[ReIDExtractor] = None
         self.reid_enabled: bool = True
+        self.identity_manager = IdentityManager()
         
         # 影片設定
         self.video_path: str = ""
@@ -103,6 +194,12 @@ class VideoSource:
         if not self.cap.isOpened():
             self.debug_log(f"無法開啟影片: {self.video_path}")
             return False
+            
+        # 取得影片 FPS
+        self.video_fps = self.cap.get(cv2.CAP_PROP_FPS)
+        if self.video_fps <= 0:
+            self.video_fps = 30.0
+        self.debug_log(f"影片 FPS: {self.video_fps}")
         
         # 初始化 YOLO
         if self.pose_extractor is None:
@@ -199,6 +296,11 @@ class VideoSource:
                 if not ret:
                     if self.loop:
                         self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                        # 重置追蹤器 ID
+                        if self.pose_extractor:
+                            self.pose_extractor.reset_tracking()
+                        # 清除 IdentityManager 的 track 映射 (因為 track_id 重置了)
+                        self.identity_manager.clear_track_map()
                         ret, frame = self.cap.read()
                     else:
                         break
@@ -228,11 +330,6 @@ class VideoSource:
                     keypoints_raw, boxes_raw, track_ids = self.pose_extractor.extract(frame)
                 yolo_time = (time.time() - yolo_start) * 1000
                 
-                # 格式化關鍵點
-                keypoints_formatted = self._format_keypoints(keypoints_raw, boxes_raw, track_ids)
-                with self.data_lock:
-                    self.latest_keypoints = keypoints_formatted
-                
                 # 提取 ReID 特徵
                 reid_results = []
                 if self.reid_enabled and self.reid_extractor and len(boxes_raw) > 0:
@@ -240,6 +337,16 @@ class VideoSource:
                 with self.data_lock:
                     self.latest_reid_results = reid_results
                 
+                # 使用 IdentityManager 解析最終 ID
+                final_ids = track_ids
+                if self.reid_enabled and self.reid_extractor:
+                    final_ids = self.identity_manager.resolve_ids(track_ids, reid_results)
+
+                # 格式化關鍵點 (使用 final_ids)
+                keypoints_formatted = self._format_keypoints(keypoints_raw, boxes_raw, final_ids)
+                with self.data_lock:
+                    self.latest_keypoints = keypoints_formatted
+
                 # 更新預覽幀
                 with self.data_lock:
                     self.preview_frame = frame.copy()
@@ -255,6 +362,22 @@ class VideoSource:
                 # 調用回調
                 if self.on_frame_received:
                     self.on_frame_received(frame_data)
+
+                # 計算處理時間並跳過幀以保持同步
+                process_duration = time.time() - capture_start
+                if self.video_fps > 0:
+                    frames_to_skip = int(process_duration * self.video_fps)
+                    if frames_to_skip > 0:
+                        for _ in range(frames_to_skip):
+                            if not self.cap.grab():
+                                if self.loop:
+                                    self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                                    # 重置追蹤器 ID
+                                    if self.pose_extractor:
+                                        self.pose_extractor.reset_tracking()
+                                    self.identity_manager.clear_track_map()
+                                else:
+                                    break
             
             time.sleep(0.005)
         

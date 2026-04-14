@@ -111,6 +111,11 @@ class PoseExtractor:
         self._init_model()
         return self.ready
     
+    def reset_tracking(self):
+        """重置追蹤狀態"""
+        self._track_to_local_id.clear()
+        self._next_local_id = 0
+
     def extract(self, frame: np.ndarray) -> Tuple[List[np.ndarray], List[np.ndarray], List[int]]:
         """
         執行 YOLO 並返回關鍵點、邊界框和追蹤 ID

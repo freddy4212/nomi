@@ -209,9 +209,10 @@ class SerialSource:
             if "image" in inner_data:
                 try:
                     img_b64 = inner_data["image"]
-                    img_bytes = base64.b64decode(img_b64)
-                    np_arr = np.frombuffer(img_bytes, np.uint8)
-                    image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+                    if img_b64:  # Check for empty string
+                        img_bytes = base64.b64decode(img_b64)
+                        np_arr = np.frombuffer(img_bytes, np.uint8)
+                        image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
                 except Exception as e:
                     self.debug_log(f"Image decode error: {e}")
             
