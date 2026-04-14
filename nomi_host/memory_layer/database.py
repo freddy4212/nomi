@@ -214,6 +214,7 @@ class DatabaseManager:
                     person_id INTEGER NOT NULL,
                     matched_member_id INTEGER REFERENCES member_registry(member_id),
                     bbox JSONB,
+                    keypoints JSONB,
                     visibility BOOLEAN DEFAULT TRUE,
                     action_label TEXT,
                     action_confidence REAL,
@@ -315,6 +316,7 @@ class DatabaseManager:
             try:
                 cursor.execute("ALTER TABLE member_state_snapshot ADD COLUMN IF NOT EXISTS last_location TEXT;")
                 cursor.execute("ALTER TABLE member_state_snapshot ADD COLUMN IF NOT EXISTS last_action_duration REAL DEFAULT 0;")
+                cursor.execute("ALTER TABLE unified_telemetry ADD COLUMN IF NOT EXISTS keypoints JSONB;")
             except Exception as e:
                 self.debug_log(f"Column migration warning: {e}")
             
@@ -346,11 +348,11 @@ class DatabaseManager:
             cursor.execute('''
                 INSERT INTO unified_telemetry (
                     timestamp, frame_no, person_id, matched_member_id,
-                    bbox, visibility, action_label, action_confidence,
+                    bbox, keypoints, visibility, action_label, action_confidence,
                     action_candidates, action_duration, motion_magnitude,
                     environment, reid_vector, source_device
                 ) VALUES (
-                    to_timestamp(%s), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    to_timestamp(%s), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 ) RETURNING id
             ''', (
                 event.timestamp,
@@ -358,6 +360,7 @@ class DatabaseManager:
                 event.person_id,
                 event.matched_member_id,
                 json.dumps(event.bbox.to_list()) if event.bbox else None,
+                json.dumps(event.keypoints) if event.keypoints else None,
                 event.visibility,
                 event.action_label,
                 event.action_confidence,
@@ -371,6 +374,36 @@ class DatabaseManager:
             result = cursor.fetchone()
             return result['id'] if result else -1
     
+    def check_persistent_inactivity(self, person_id: int, duration_minutes: int, threshold: float) -> bool:
+        """
+        檢查某人是否在過去 X 分鐘內的平均動作幅度都低於閾值
+        這是支援 RuleEngine 的 Hybrid 查詢功能
+        """
+        if not self.is_connected:
+            return False
+            
+        try:
+            with self.get_cursor() as cursor:
+                # 使用 TimescaleDB 強大的時間桶查詢
+                # 我們不查詢每一筆，而是查詢聚合後的統計，效率極高
+                query = """
+                    SELECT AVG(motion_magnitude)
+                    FROM unified_telemetry
+                    WHERE person_id = %s
+                      AND timestamp > (NOW() - INTERVAL '%s minutes')
+                """
+                cursor.execute(query, (person_id, duration_minutes))
+                result = cursor.fetchone()
+                
+                if result and result['avg'] is not None:
+                    avg_motion = float(result['avg'])
+                    # 如果平均動作小於閾值，判定為長時間靜止
+                    return avg_motion < threshold
+                return False
+        except Exception as e:
+            self.debug_log(f"Check inactivity error: {e}")
+            return False
+
     def insert_perception_events_batch(self, events: List[PerceptionEvent]) -> int:
         """
         批次寫入感知事件
@@ -393,6 +426,7 @@ class DatabaseManager:
                     event.person_id,
                     event.matched_member_id,
                     json.dumps(event.bbox.to_list()) if event.bbox else None,
+                    json.dumps(event.keypoints) if event.keypoints else None,
                     _ensure_python_type(event.visibility),
                     event.action_label,
                     _ensure_python_type(event.action_confidence),
@@ -407,11 +441,11 @@ class DatabaseManager:
             psycopg2.extras.execute_batch(cursor, '''
                 INSERT INTO unified_telemetry (
                     timestamp, frame_no, person_id, matched_member_id,
-                    bbox, visibility, action_label, action_confidence,
+                    bbox, keypoints, visibility, action_label, action_confidence,
                     action_candidates, action_duration, motion_magnitude,
                     environment, reid_vector, source_device
                 ) VALUES (
-                    to_timestamp(%s), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::vector, %s
+                    to_timestamp(%s), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::vector, %s
                 )
             ''', data)
             
@@ -591,7 +625,8 @@ class DatabaseManager:
         with self.get_cursor() as cursor:
             # Debug: Check what's in the DB for this member
             cursor.execute("SELECT COUNT(*) FROM unified_telemetry WHERE matched_member_id = %s", (member_id,))
-            total_count = cursor.fetchone()[0] if member_id != 0 else 0
+            result = cursor.fetchone()
+            total_count = result['count'] if result and member_id != 0 else 0
             
             if member_id == 0:
                 # 查詢未知訪客 (matched_member_id 為 NULL)
@@ -599,21 +634,31 @@ class DatabaseManager:
                     SELECT t.*, '未知訪客' as member_name
                     FROM unified_telemetry t
                     WHERE t.matched_member_id IS NULL
-                    AND t.timestamp >= to_timestamp(%s) - interval '1 second'
-                    AND t.timestamp <= to_timestamp(%s) + interval '1 second'
+                    AND t.timestamp >= to_timestamp(%s) - interval '2 seconds'
+                    AND t.timestamp <= to_timestamp(%s) + interval '2 seconds'
+                    ORDER BY t.timestamp ASC
+                ''', (start_time, end_time))
+            elif member_id == -1:
+                # 特別模式：查詢時間範圍內的所有事件 (用於評估/除錯)
+                cursor.execute('''
+                    SELECT t.*, COALESCE(m.name, '未知訪客') as member_name
+                    FROM unified_telemetry t
+                    LEFT JOIN member_registry m ON t.matched_member_id = m.member_id
+                    WHERE t.timestamp >= to_timestamp(%s) - interval '2 seconds'
+                    AND t.timestamp <= to_timestamp(%s) + interval '2 seconds'
                     ORDER BY t.timestamp ASC
                 ''', (start_time, end_time))
             else:
-                # 這裡使用 person_id 查詢，因為前端傳入的是 tracker 分配的 person_id
+                # 這裡優先查詢 matched_member_id，若無則查 person_id
                 cursor.execute('''
                     SELECT t.*, m.name as member_name
                     FROM unified_telemetry t
                     LEFT JOIN member_registry m ON t.matched_member_id = m.member_id
-                    WHERE t.person_id = %s
-                    AND t.timestamp >= to_timestamp(%s) - interval '1 second'
-                    AND t.timestamp <= to_timestamp(%s) + interval '1 second'
+                    WHERE (t.matched_member_id = %s OR t.person_id = %s)
+                    AND t.timestamp >= to_timestamp(%s) - interval '2 seconds'
+                    AND t.timestamp <= to_timestamp(%s) + interval '2 seconds'
                     ORDER BY t.timestamp ASC
-                ''', (member_id, start_time, end_time))
+                ''', (member_id, member_id, start_time, end_time))
             
             results = cursor.fetchall()
             print(f"[Database] Range query for member {member_id}: {len(results)} results (Total in DB for member: {total_count})")

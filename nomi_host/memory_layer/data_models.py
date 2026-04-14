@@ -58,6 +58,8 @@ class EnvironmentData:
     light: Optional[float] = None           # 光照 (lux)
     sound_event: Optional[str] = None       # 聲音事件標籤 (如: "glass_break", "scream")
     room: Optional[str] = None              # 房間名稱 (如: "Living Room")
+    activity_label: Optional[str] = None    # 活動標籤 (如: "cooking", "sleeping") - 來自環境感測器/資料集的 Ground Truth
+    ground_truth_action: Optional[str] = None  # NTU 動作編碼 (如: "A043") - 用於評估準確度
     
     def to_dict(self) -> Dict[str, Any]:
         return {k: v for k, v in asdict(self).items() if v is not None}
@@ -82,6 +84,7 @@ class PerceptionEvent:
     
     # === 空間資訊 ===
     bbox: Optional[BoundingBox] = None      # 邊界框
+    keypoints: Optional[List[List[float]]] = None # 17 個骨架點 [[x, y, score], ...]
     visibility: bool = True                 # 是否在鏡頭內可見
     
     # === 動作資訊 ===
@@ -106,6 +109,7 @@ class PerceptionEvent:
             "reid_vector": self.reid_vector,
             "matched_member_id": self.matched_member_id,
             "bbox": self.bbox.to_list() if self.bbox else None,
+            "keypoints": self.keypoints,
             "visibility": self.visibility,
             "action_label": self.action_label,
             "action_confidence": self.action_confidence,
@@ -142,6 +146,7 @@ class PerceptionEvent:
             reid_vector=data.get("reid_vector"),
             matched_member_id=data.get("matched_member_id"),
             bbox=bbox,
+            keypoints=data.get("keypoints"),
             visibility=data.get("visibility", True),
             action_label=data.get("action_label", "Unknown"),
             action_confidence=data.get("action_confidence", 0.0),
@@ -205,6 +210,7 @@ def create_perception_event(
     matched_member_id: Optional[int] = None,
     environment: Optional[Dict[str, Any]] = None,
     source_device: str = "WiseEye2",
+    keypoints: Optional[List[List[float]]] = None,
 ) -> PerceptionEvent:
     """
     工廠函數：建立 PerceptionEvent
@@ -235,6 +241,7 @@ def create_perception_event(
         reid_vector=reid_vector,
         matched_member_id=matched_member_id,
         bbox=bbox_obj,
+        keypoints=keypoints,
         visibility=True,
         action_label=action_label,
         action_confidence=action_confidence,

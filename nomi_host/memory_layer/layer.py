@@ -14,11 +14,13 @@ try:
     from .config import memory_config
     from .data_models import MemberState, PerceptionEvent
     from .database import DatabaseManager
+    from .modules.rules import RuleEngine
     from .modules.state import MemberStateManager
 except (ImportError, ValueError):
     from config import memory_config
     from data_models import MemberState, PerceptionEvent
     from database import DatabaseManager
+    from modules.rules import RuleEngine
     from modules.state import MemberStateManager
 
 
@@ -59,6 +61,8 @@ class MemoryLayerV2(threading.Thread):
         # 子模組
         self.db = DatabaseManager()
         self.state_manager = MemberStateManager(on_state_change=on_state_change)
+        # 傳入 db manager 給 RuleEngine
+        self.rule_engine = RuleEngine(db_manager=self.db)
         
         # 回調
         self.on_event_processed = on_event_processed
@@ -200,6 +204,13 @@ class MemoryLayerV2(threading.Thread):
 
         # 2. 更新成員狀態
         state = self.state_manager.update_from_event(event)
+
+        # 2.5 執行規則檢查
+        if state:
+            rule_results = self.rule_engine.process_event(event, state)
+            for res in rule_results:
+                self.debug_log(f"*** RULE TRIGGERED: {res.label} - {res.description} ***")
+                # TODO: 可以將這些結果存入 DB (例如 Insight 資料表) 或發送到前端
         
         # 3. 同步到資料庫（節流）
         if state and self.state_manager.should_sync_to_db(event.person_id):
