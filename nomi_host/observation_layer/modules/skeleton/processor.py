@@ -60,6 +60,7 @@ class SkeletonFrame:
     timestamp: float
     frame_no: int
     persons: List[PersonSkeleton]
+    environment: Dict[str, Any] = field(default_factory=dict)
 
 
 class SkeletonSmoother:
@@ -606,7 +607,8 @@ class SkeletonProcessor:
             empty_frame = SkeletonFrame(
                 timestamp=frame_data.timestamp,
                 frame_no=frame_data.frame_no,
-                persons=[]
+                persons=[],
+                environment=frame_data.environment
             )
             # 將空幀加入 interpolated_buffer
             self._add_to_interpolated_buffer(empty_frame)
@@ -628,7 +630,14 @@ class SkeletonProcessor:
         else:
             frame_diff = frame_no - self._last_frame_no
             # 如果幀號亂跳、重置或間隔太大，則重置平滑狀態
-            if frame_diff <= 0 or frame_diff > 10:
+            # 因應 Simulator 可能每次都斷線並重送 Frame 0，這裡放寬條件
+            if frame_no == 0 and frame_diff <= 0:
+                 # 偵測到模擬器重新啟動或 Frame No 重置，強制前進時間戳
+                 # 這樣可以讓 Interpolation 認為這是一個新的有效幀，而不是重複或過舊的幀
+                 timestamp_to_use = self._last_stable_time + 0.1
+                 self._last_frame_no = frame_no
+                 self._last_stable_time = timestamp_to_use
+            elif frame_diff < 0 or frame_diff > 10:
                  self._last_frame_no = frame_no
                  self._last_stable_time = current_time
             else:
@@ -731,7 +740,8 @@ class SkeletonProcessor:
             empty_frame = SkeletonFrame(
                 timestamp=frame_data.timestamp,
                 frame_no=frame_data.frame_no,
-                persons=[]
+                persons=[],
+                environment=frame_data.environment
             )
             self._add_to_interpolated_buffer(empty_frame)
             self._sender_to_local_id.clear()
@@ -741,14 +751,15 @@ class SkeletonProcessor:
         skeleton_frame = SkeletonFrame(
             timestamp=frame_data.timestamp,
             frame_no=frame_data.frame_no,
-            persons=persons
+            persons=persons,
+            environment=frame_data.environment
         )
         
         # 加入原始緩衝區
         self.raw_buffer.append(skeleton_frame)
         
         # 處理插值幀
-        self._add_interpolated_frames(interpolated_persons_list, frame_data.timestamp, frame_data.frame_no)
+        self._add_interpolated_frames(interpolated_persons_list, frame_data.timestamp, frame_data.frame_no, environment=frame_data.environment)
         
         return skeleton_frame
     
@@ -756,7 +767,8 @@ class SkeletonProcessor:
         self, 
         interpolated_persons_list: List[Tuple[int, Tuple, float, List[np.ndarray], Optional[np.ndarray]]],
         base_timestamp: float,
-        frame_no: int
+        frame_no: int,
+        environment: Dict[str, Any] = None
     ):
         """將預處理器生成的插值幀加入緩衝區"""
         if not interpolated_persons_list:
@@ -796,7 +808,8 @@ class SkeletonProcessor:
                 interp_frame = SkeletonFrame(
                     timestamp=frame_timestamp,
                     frame_no=frame_no,
-                    persons=interp_persons
+                    persons=interp_persons,
+                    environment=environment or {}
                 )
                 self.interpolated_buffer.append(interp_frame)
                 self.interpolated_frame_count += 1
@@ -815,7 +828,11 @@ class SkeletonProcessor:
             
             if len(kp) >= 4:
                 kp_x, kp_y, kp_s, kp_t = kp[:4]
-                keypoints[i] = [float(kp_x), float(kp_y), float(kp_s)]
+                # Check if score is > 1.0 (e.g. 0-100 range)
+                s_val = float(kp_s)
+                if s_val > 1.0:
+                    s_val = s_val / 100.0
+                keypoints[i] = [float(kp_x), float(kp_y), s_val]
         
         return keypoints
     
@@ -849,11 +866,9 @@ class SkeletonProcessor:
         if len(self.interpolated_buffer) < config.interpolation.sequence_length:
             return {}
         
-        latest_frame = self.get_latest_interpolated_frame()
-        if not latest_frame or not latest_frame.persons:
-            return {}
-            
-        current_person_ids = [p.person_id for p in latest_frame.persons]
+        # 使用 person_tracker 獲取所有可見人物，而不是只看最後一幀
+        # 這可以避免因補幀數量不一致導致某人在最後一幀缺失而被忽略的問題
+        current_person_ids = self.get_visible_persons()
         
         frames = list(self.interpolated_buffer)[-config.interpolation.sequence_length:]
         
@@ -864,13 +879,25 @@ class SkeletonProcessor:
                 dtype=np.float32
             )
             
+            last_valid_kpts = None
+            found_any = False
+            
             for t, frame in enumerate(frames):
+                found_in_frame = False
                 for person in frame.persons:
                     if person.person_id == person_id:
                         sequence[t] = person.keypoints
+                        last_valid_kpts = person.keypoints
+                        found_in_frame = True
+                        found_any = True
                         break
+                
+                # 如果該幀缺失該人物（例如補幀長度不一），使用上一次的有效骨架填補
+                if not found_in_frame and last_valid_kpts is not None:
+                    sequence[t] = last_valid_kpts
             
-            sequences[person_id] = sequence
+            if found_any:
+                sequences[person_id] = sequence
         
         return sequences
     

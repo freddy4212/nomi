@@ -239,6 +239,7 @@ class MemoryBridge:
         matched_member_id: Optional[int] = None,
         environment: Optional[Dict[str, Any]] = None,
         source_device: str = "WiseEye2",
+        keypoints: Optional[List[List[float]]] = None,
     ) -> bool:
         """發送動作識別結果到記憶層"""
         if not self._enabled:
@@ -258,6 +259,7 @@ class MemoryBridge:
                 matched_member_id=matched_member_id,
                 environment=environment,
                 source_device=source_device,
+                keypoints=keypoints,
             )
             
             # === 過濾邏輯 (Debouncing) ===

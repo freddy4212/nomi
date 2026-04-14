@@ -450,6 +450,23 @@ class ReceiverCore(threading.Thread):
                     action_candidates = result.top_k_actions if result.top_k_actions else []
                     action_duration = result.duration
                 
+                # 取得骨架關鍵點並轉換為列表格式
+                keypoints = None
+                try:
+                    kp_array = person.get_keypoints(use_smoothed=True)
+                    if kp_array is not None:
+                        keypoints = kp_array.tolist()
+                except Exception as e:
+                    self.debug_log(f"Failed to convert keypoints: {e}")
+
+                # 整合環境資料 (包含房間名稱與感測器數值)
+                env_data = {"room": config.room_name}
+                if hasattr(latest_frame, 'environment') and latest_frame.environment:
+                    # 過濾只保留 EnvironmentData 支援的欄位，避免傳入額外欄位導致錯誤
+                    supported_fields = {"temperature", "humidity", "co2", "light", "sound_event", "room", "activity_label", "ground_truth_action"}
+                    valid_env = {k: v for k, v in latest_frame.environment.items() if k in supported_fields}
+                    env_data.update(valid_env)
+
                 self.memory_bridge.send_action_result(
                     person_id=person_id,
                     frame_no=self._frame_counter,
@@ -461,7 +478,8 @@ class ReceiverCore(threading.Thread):
                     motion_magnitude=motion,
                     reid_vector=reid_vector,
                     matched_member_id=matched_member_id,
-                    environment={"room": config.room_name}
+                    environment=env_data,
+                    keypoints=keypoints
                 )
                 
         except Exception as e:

@@ -36,6 +36,7 @@ class FrameData:
     reid_results: List[Any]  # ReID 結果
     basic_info: Dict[str, Any]  # 裝置基本資訊
     frame_info: Dict[str, Any]  # 幀資訊（algo_tick 等）
+    environment: Dict[str, Any]  # 環境資訊 (溫度、濕度等)
     raw_data: Dict[str, Any]  # 原始 JSON 資料
 
 
@@ -390,9 +391,10 @@ class NetworkReceiver:
             if "image" in inner_data:
                 try:
                     img_b64 = inner_data["image"]
-                    img_bytes = base64.b64decode(img_b64)
-                    np_arr = np.frombuffer(img_bytes, np.uint8)
-                    image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+                    if img_b64:  # 只有當影像字串不為空時才進行解碼
+                        img_bytes = base64.b64decode(img_b64)
+                        np_arr = np.frombuffer(img_bytes, np.uint8)
+                        image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
                 except Exception as e:
                     self.debug_log(f"Image decode error: {e}")
             
@@ -413,6 +415,7 @@ class NetworkReceiver:
                 reid_results=inner_data.get("reid_results", []),
                 basic_info=inner_data.get("basic_info", {}),
                 frame_info=frame_info,
+                environment=inner_data.get("environment", {}),
                 raw_data=inner_data
             )
             

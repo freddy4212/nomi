@@ -206,7 +206,7 @@ class ActionRecognizer:
                         valid_actions = ["跳躍", "打架/衝突", "躺下/跌倒", "跑步", "走路"]
                     else:
                         motion_type = "移動"
-                        valid_actions = ["站立", "走路", "運動/伸展", "蹲下/低姿態"]
+                        valid_actions = ["站立", "走路", "運動/伸展", "蹲下/低姿態", "打架/衝突"]
                         
                     result.motion_status = f"{motion_magnitude:.1f} ({motion_type})"
                     
@@ -444,13 +444,34 @@ class ActionRecognizer:
         wrist_positions = skeleton_sequence[:, [9, 10], :2]
         wrist_movement = np.sum(np.abs(np.diff(wrist_positions, axis=0)))
         
+        # Per-wrist movement for asymmetry detection
+        left_wrist_movement = np.sum(np.abs(np.diff(skeleton_sequence[:, 9, :2], axis=0)))
+        right_wrist_movement = np.sum(np.abs(np.diff(skeleton_sequence[:, 10, :2], axis=0)))
+        wrist_asymmetry = abs(left_wrist_movement - right_wrist_movement) / (max(left_wrist_movement, right_wrist_movement) + 1e-6)
+        
         ankle_positions = skeleton_sequence[:, [15, 16], :2]
         ankle_movement = np.sum(np.abs(np.diff(ankle_positions, axis=0)))
         
         hip_positions = skeleton_sequence[:, [11, 12], 1]
         avg_hip_height = np.mean(hip_positions)
         
+        # Head stability for fight detection
+        head_positions = skeleton_sequence[:, 0, 1]  # Y axis of nose
+        head_vertical_range = np.max(head_positions) - np.min(head_positions)
+        
         action_scores = {}
+        
+        # Fight/punch detection: high wrist movement + asymmetric + head stable
+        if wrist_movement > 80 and wrist_asymmetry > 0.15 and head_vertical_range < 150:
+            fight_score = min(wrist_movement / 300, 1.0) * (0.5 + 0.5 * wrist_asymmetry)
+            if fight_score > 0.25:
+                action_scores["打架/衝突"] = fight_score
+        
+        # Fall detection: rapid head descent
+        head_diffs = np.diff(head_positions)
+        max_head_drop = np.max(head_diffs) if len(head_diffs) > 0 else 0
+        if max_head_drop > 100:
+            action_scores["躺下/跌倒"] = min(max_head_drop / 200, 1.0)
         
         if vertical_movement > 50:
             action_scores["跳躍"] = min(vertical_movement / 100, 1.0)
