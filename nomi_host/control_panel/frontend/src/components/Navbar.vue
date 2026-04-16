@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { 
   Eye, Brain, Cpu, 
   UserSquare2, Settings, 
   MoreHorizontal, ChevronLeft,
   Home
 } from 'lucide-vue-next'
+import { useI18n } from '../composables/useI18n'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   currentModule: string
@@ -14,17 +17,17 @@ const props = defineProps<{
 
 const emit = defineEmits(['update:module', 'update:tool'])
 
-const modules = [
-  { id: 'perception', name: '感知', icon: Eye },
-  { id: 'memory', name: '記憶', icon: Brain },
-  { id: 'inference', name: '推論', icon: Cpu },
-]
+const modules = computed(() => [
+  { id: 'perception', name: t('nav.perception'), icon: Eye },
+  { id: 'memory', name: t('nav.memory'), icon: Brain },
+  { id: 'inference', name: t('nav.inference'), icon: Cpu },
+])
 
-const tools = [
-  { id: 'iot', name: 'IoT裝置管理', icon: Home },
-  { id: 'setup', name: '錄入與標定', icon: UserSquare2 },
-  { id: 'settings', name: '系統設定', icon: Settings },
-]
+const tools = computed(() => [
+  { id: 'iot', name: t('nav.iot'), icon: Home },
+  { id: 'setup', name: t('nav.setup'), icon: UserSquare2 },
+  { id: 'settings', name: t('nav.settings'), icon: Settings },
+])
 
 const isMobileModuleOpen = ref(false)
 const isMobileToolOpen = ref(false)

@@ -1,11 +1,26 @@
 <script setup lang="ts">
 import { Database } from 'lucide-vue-next'
+import { useI18n } from '../composables/useI18n'
+
+const { t, tDynamic } = useI18n()
 
 defineProps<{
   events: any[]
   formatDate: (timestamp: any) => string
   selectedMemberId?: number | null
 }>()
+
+const formatEnvironment = (env: any) => {
+  if (!env) return '-'
+  const parts = []
+  if (env.room) parts.push(tDynamic(env.room))
+  if (env.temperature !== undefined) parts.push(`${env.temperature}°C`)
+  if (env.humidity !== undefined) parts.push(`${env.humidity}%`)
+  if (env.co2 !== undefined) parts.push(`CO2: ${env.co2}`)
+  if (env.light !== undefined) parts.push(`${env.light} lx`)
+  if (env.sound_event) parts.push(`🔊 ${tDynamic(env.sound_event)}`)
+  return parts.join(' | ') || '-'
+}
 </script>
 
 <template>
@@ -14,15 +29,15 @@ defineProps<{
       <table class="w-full text-left text-sm border-collapse">
         <thead class="text-gray-400 bg-gray-800/95 sticky top-0 backdrop-blur-md z-10 shadow-sm">
           <tr>
-            <th class="p-2 md:p-4 font-medium border-b border-gray-700 whitespace-nowrap">時間</th>
-            <th class="p-2 md:p-4 font-medium border-b border-gray-700 whitespace-nowrap">人物 ID</th>
-            <th class="p-2 md:p-4 font-medium border-b border-gray-700 whitespace-nowrap">識別成員</th>
-            <th class="p-2 md:p-4 font-medium border-b border-gray-700 whitespace-nowrap">動作</th>
-            <th class="p-2 md:p-4 font-medium border-b border-gray-700 whitespace-nowrap">信心度</th>
-            <th class="p-2 md:p-4 font-medium border-b border-gray-700 whitespace-nowrap">持續時間</th>
-            <th class="p-2 md:p-4 font-medium border-b border-gray-700 whitespace-nowrap">位置</th>
+            <th class="p-2 md:p-4 font-medium border-b border-gray-700 whitespace-nowrap">{{ t('memory.time') }}</th>
+            <th class="p-2 md:p-4 font-medium border-b border-gray-700 whitespace-nowrap">{{ t('memory.personId') }}</th>
+            <th class="p-2 md:p-4 font-medium border-b border-gray-700 whitespace-nowrap">{{ t('memory.member') }}</th>
+            <th class="p-2 md:p-4 font-medium border-b border-gray-700 whitespace-nowrap">{{ t('memory.action') }}</th>
+            <th class="p-2 md:p-4 font-medium border-b border-gray-700 whitespace-nowrap">{{ t('memory.confidence') }}</th>
+            <th class="p-2 md:p-4 font-medium border-b border-gray-700 whitespace-nowrap">{{ t('memory.duration') }}</th>
+            <th class="p-2 md:p-4 font-medium border-b border-gray-700 whitespace-nowrap">{{ t('perception.environment') }}</th>
             <th class="p-2 md:p-4 font-medium border-b border-gray-700 whitespace-nowrap">BBox</th>
-            <th class="p-2 md:p-4 font-medium border-b border-gray-700 whitespace-nowrap">運動量</th>
+            <th class="p-2 md:p-4 font-medium border-b border-gray-700 whitespace-nowrap">{{ t('perception.magnitude') }}</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-800/50">
@@ -30,7 +45,7 @@ defineProps<{
             <td colspan="9" class="p-12 text-center">
               <div class="flex flex-col items-center gap-2">
                 <Database class="w-12 h-12 opacity-10" />
-                <p>{{ selectedMemberId ? '該成員暫無事件資料' : '暫無事件資料' }}</p>
+                <p>{{ selectedMemberId ? t('common.loading') : t('common.loading') }}</p>
               </div>
             </td>
           </tr>
@@ -45,7 +60,7 @@ defineProps<{
             </td>
             <td class="p-2 md:p-4">
               <span class="px-2 py-1 bg-primary/10 text-primary rounded-lg text-xs font-medium border border-primary/20 whitespace-nowrap">
-                {{ event.action_label }}
+                {{ tDynamic(event.action_label) }}
               </span>
             </td>
             <td class="p-2 md:p-4">
@@ -57,7 +72,7 @@ defineProps<{
               </div>
             </td>
             <td class="p-2 md:p-4 text-gray-400 text-xs">{{ event.action_duration ? `${event.action_duration.toFixed(1)}s` : '-' }}</td>
-            <td class="p-2 md:p-4 text-gray-400 text-xs">{{ event.environment?.room || '-' }}</td>
+            <td class="p-2 md:p-4 text-gray-400 text-xs font-mono whitespace-pre-wrap min-w-[120px]">{{ event.environment ? formatEnvironment(event.environment) : '-' }}</td>
             <td class="p-2 md:p-4 text-gray-500 text-[10px] font-mono">{{ event.bbox ? event.bbox.join(',') : '-' }}</td>
             <td class="p-2 md:p-4 text-gray-400 text-xs">{{ event.motion_magnitude ? event.motion_magnitude.toFixed(2) : '-' }}</td>
           </tr>

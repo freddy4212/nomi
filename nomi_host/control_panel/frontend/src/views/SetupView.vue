@@ -1,15 +1,17 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { UserPlus, Box } from 'lucide-vue-next'
+import { useI18n } from '../composables/useI18n'
 import VectorEntryView from './VectorEntryView.vue'
 import SpaceCalibrationView from './SpaceCalibrationView.vue'
 
+const { t } = useI18n()
 const activeTab = ref('vector-entry')
 
-const tabs = [
-  { id: 'vector-entry', name: '向量錄入', icon: UserPlus },
-  { id: 'space-calibration', name: '空間標定', icon: Box },
-]
+const tabs = computed(() => [
+  { id: 'vector-entry', name: t('setup.vectorEntry'), icon: UserPlus },
+  { id: 'space-calibration', name: t('setup.spaceCalibration'), icon: Box },
+])
 
 const emit = defineEmits(['status-update'])
 

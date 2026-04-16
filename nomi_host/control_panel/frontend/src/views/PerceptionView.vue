@@ -2,7 +2,9 @@
 import { ref, onMounted, onUnmounted, defineEmits } from 'vue'
 import { Maximize2, Activity, User, Zap, Database, Cpu, Hash, Info, Layers, Monitor, X, Clock, Scan } from 'lucide-vue-next'
 import CameraStream from '../components/CameraStream.vue'
+import { useI18n } from '../composables/useI18n'
 
+const { t, tDynamic } = useI18n()
 const emit = defineEmits(['status-update'])
 
 const fps = ref(0)
@@ -65,9 +67,9 @@ const formatStatus = (statusStr) => {
   if (!statusStr) return { value: '-', label: '' }
   const match = statusStr.match(/^([^(]+)(?:\(([^)]+)\))?$/)
   if (match) {
-    return { value: match[1], label: match[2] || '' }
+    return { value: tDynamic(match[1]), label: tDynamic(match[2]) || '' }
   }
-  return { value: statusStr, label: '' }
+  return { value: tDynamic(statusStr), label: '' }
 }
 </script>
 
@@ -256,7 +258,7 @@ const formatStatus = (statusStr) => {
         <div v-if="persons.length === 0" class="h-full flex items-center justify-center text-gray-500/40">
           <div class="text-center">
             <User class="w-16 h-16 mx-auto mb-4 opacity-20" />
-            <p class="text-lg font-medium">無人偵測</p>
+            <p class="text-lg font-medium">{{ t('perception.noPerson') }}</p>
             <p class="text-sm opacity-60">No Person Detected</p>
           </div>
         </div>
@@ -273,9 +275,9 @@ const formatStatus = (statusStr) => {
               <!-- Action -->
               <div>
                 <div class="text-gray-400 text-[10px] mb-1 uppercase tracking-wider flex items-center gap-1">
-                  <Activity class="w-3 h-3" /> 動作
+                  <Activity class="w-3 h-3" /> {{ t('perception.action') }}
                 </div>
-                <div class="text-2xl md:text-3xl font-bold text-primary truncate">{{ person.action }}</div>
+                <div class="text-2xl md:text-3xl font-bold text-primary truncate">{{ tDynamic(person.action) }}</div>
                 <div class="text-[10px] text-gray-500 mt-1 flex items-center gap-2">
                   <div class="h-1 w-full bg-gray-700 rounded-full overflow-hidden">
                     <div class="h-full bg-primary transition-all duration-300" :style="{ width: `${person.confidence * 100}%` }"></div>
@@ -287,10 +289,10 @@ const formatStatus = (statusStr) => {
               <!-- ReID -->
               <div>
                 <div class="text-gray-400 text-[10px] mb-1 uppercase tracking-wider flex items-center gap-1">
-                  <User class="w-3 h-3" /> 識別
+                  <User class="w-3 h-3" /> {{ t('perception.identification') }}
                 </div>
                 <div class="text-2xl md:text-3xl font-bold truncate" :class="person.reid_name ? 'text-blue-400' : 'text-gray-600'">
-                  {{ person.reid_name || '未知' }}
+                  {{ person.reid_name || t('perception.unknown') }}
                 </div>
                 <div class="text-[10px] text-gray-500 mt-1 flex items-center gap-2">
                   <div class="h-1 w-full bg-gray-700 rounded-full overflow-hidden">
@@ -306,7 +308,7 @@ const formatStatus = (statusStr) => {
               <!-- Skeleton Status -->
               <div class="flex flex-col items-center justify-center text-center">
                 <div class="text-gray-500 text-[9px] mb-1 uppercase tracking-wider flex items-center gap-1">
-                  <Scan class="w-2.5 h-2.5" /> 骨架狀態
+                  <Scan class="w-2.5 h-2.5" /> {{ t('perception.skeletonStatus') }}
                 </div>
                 <div class="flex flex-col items-center leading-tight">
                   <span class="text-sm md:text-base font-bold text-gray-200">{{ formatStatus(person.skeleton_status).value }}</span>
@@ -317,7 +319,7 @@ const formatStatus = (statusStr) => {
               <!-- Motion Status -->
               <div class="flex flex-col items-center justify-center text-center border-l border-gray-800">
                 <div class="text-gray-500 text-[9px] mb-1 uppercase tracking-wider flex items-center gap-1">
-                  <Zap class="w-2.5 h-2.5" /> 動作強度
+                  <Zap class="w-2.5 h-2.5" /> {{ t('perception.magnitude') }}
                 </div>
                 <div class="flex flex-col items-center leading-tight">
                   <span class="text-sm md:text-base font-bold text-gray-200">{{ formatStatus(person.motion_status).value }}</span>
@@ -328,7 +330,7 @@ const formatStatus = (statusStr) => {
               <!-- Duration -->
               <div class="flex flex-col items-center justify-center text-center border-l border-gray-800">
                 <div class="text-gray-500 text-[9px] mb-1 uppercase tracking-wider flex items-center gap-1">
-                  <Clock class="w-2.5 h-2.5" /> 持續時間
+                  <Clock class="w-2.5 h-2.5" /> {{ t('perception.duration') }}
                 </div>
                 <div class="flex flex-col items-center leading-tight">
                   <span class="text-sm md:text-base font-bold text-gray-200 font-mono">{{ (person.duration || 0).toFixed(1) }}</span>

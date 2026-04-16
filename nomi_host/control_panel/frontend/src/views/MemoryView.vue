@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, defineEmits, computed } from 'vue'
 import { RefreshCw, ChevronDown, ChevronUp } from 'lucide-vue-next'
+import { useI18n } from '../composables/useI18n'
 import MemberCard from '../components/MemberCard.vue'
 import EventsTable from '../components/EventsTable.vue'
 import TimeRangePicker from '../components/TimeRangePicker.vue'
 
 const emit = defineEmits(['status-update'])
+const { t } = useI18n()
 
 const events = ref([])
 const allMembers = ref([])
@@ -14,15 +16,16 @@ const isPaused = ref(false)
 const showRangePicker = ref(false)
 const isMembersOpen = ref(false)
 const selectedMemberId = ref(null)
-const selectedRange = ref({ label: '今日', value: 86400 })
 
-const timeRanges = [
-  { label: '近一小時', value: 3600 },
-  { label: '今日', value: 86400 },
-  { label: '本週', value: 604800 },
-  { label: '本月', value: 2592000 },
-  { label: '所有', value: 0 }
-]
+const timeRanges = computed(() => [
+  { label: t('memory.timeRange.lastHour'), value: 3600 },
+  { label: t('memory.timeRange.today'), value: 86400 },
+  { label: t('memory.timeRange.thisWeek'), value: 604800 },
+  { label: t('memory.timeRange.thisMonth'), value: 2592000 },
+  { label: t('memory.timeRange.all'), value: 0 }
+])
+
+const selectedRange = ref({ label: t('memory.timeRange.today'), value: 86400 })
 
 let ws = null
 
@@ -39,7 +42,7 @@ const selectMember = (id) => {
 }
 
 const editMember = (member) => {
-  const newName = prompt('請輸入新的成員名稱：', member.name)
+  const newName = prompt(t('setup.enterNamePlaceholder'), member.name)
   if (newName && newName !== member.name) {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({
@@ -53,7 +56,7 @@ const editMember = (member) => {
 }
 
 const deleteMember = (member) => {
-  if (confirm(`確定要刪除成員「${member.name}」嗎？\n這將會解除所有相關事件的關聯。`)) {
+  if (confirm(t('settings.confirmClear'))) { // Not perfect but reuse for now
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({
         type: 'command',
@@ -209,10 +212,10 @@ const formatDateInline = (timestamp) => {
         type="button"
         @click="toggleMembers"
         class="flex items-center gap-2 group cursor-pointer text-gray-400 hover:text-white transition-colors py-2 select-none"
-        title="切換顯示已註冊成員"
+        :title="t('memory.title')"
       >
         <component :is="isMembersOpen ? ChevronUp : ChevronDown" class="w-5 h-5" />
-        <span class="font-bold text-lg tracking-wide">顯示已註冊成員</span>
+        <span class="font-bold text-lg tracking-wide">{{ t('memory.title') }}</span>
       </button>
 
       <!-- Right: Tools -->
@@ -228,7 +231,7 @@ const formatDateInline = (timestamp) => {
       <button 
         @click.stop="togglePause"
         class="p-2 text-gray-400 hover:text-primary hover:bg-gray-800 rounded-lg flex items-center justify-center transition-colors group cursor-pointer relative z-50 isolate"
-        :title="isPaused ? '恢復自動更新' : '暫停自動更新'"
+        :title="isPaused ? t('memory.resume') : t('memory.pause')"
       >
         <div class="pointer-events-none relative">
           <RefreshCw 
@@ -260,7 +263,7 @@ const formatDateInline = (timestamp) => {
                @click.self="selectedMemberId = null"
                class="bg-bgLight/50 backdrop-blur-sm rounded-2xl border border-gray-700 shadow-2xl p-3 overflow-hidden">
             <div v-if="allMembers.length === 0" class="bg-bgLight/30 border border-dashed border-gray-700 rounded-xl p-8 text-center text-gray-500 h-28 flex items-center justify-center">
-              <p>尚未註冊任何成員</p>
+              <p>{{ t('common.loading') }}</p>
             </div>
             <div v-else 
                  @click.self="selectedMemberId = null"

@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, defineEmits, computed } from 'vue'
 import { RefreshCw, Brain, Activity, Search, Filter, UserX, X, Info } from 'lucide-vue-next'
+import { useI18n } from '../composables/useI18n'
 import MemberInferenceCard from '../components/MemberInferenceCard.vue'
 
 const emit = defineEmits(['status-update'])
+const { t } = useI18n()
 
 const memberStates = ref([])
 const events = ref([])
 const isLoading = ref(false)
+const isPaused = ref(false)
 const searchQuery = ref('')
 let ws = null
 
@@ -58,7 +61,7 @@ const groupedData = computed(() => {
   if (unknownEvents.length > 0) {
     result.push({
       id: 'unknown',
-      name: '未知訪客 (Unknown)',
+      name: t('memory.unknownVisitor'),
       lastAction: unknownEvents[0].action_label,
       lastSeen: unknownEvents[0].timestamp,
       location: unknownEvents[0].environment?.room,
@@ -103,20 +106,22 @@ const connectWebSocket = () => {
         }
         isLoading.value = false
       } else if (data.type === 'new_event') {
-        events.value.unshift(data.data)
-        if (events.value.length > 200) events.value.pop()
-        
-        // Update member state if it exists
-        const pid = data.data.person_id
-        if (pid !== undefined && pid !== null) {
-          const stateIdx = memberStates.value.findIndex(s => s.person_id === pid)
-          if (stateIdx !== -1) {
-            memberStates.value[stateIdx] = {
-              ...memberStates.value[stateIdx],
-              last_action: data.data.action_label,
-              last_seen_time: data.data.timestamp,
-              last_location: data.data.environment?.room,
-              is_visible: true
+        if (!isPaused.value) {
+          events.value.unshift(data.data)
+          if (events.value.length > 200) events.value.pop()
+          
+          // Update member state if it exists
+          const pid = data.data.person_id
+          if (pid !== undefined && pid !== null) {
+            const stateIdx = memberStates.value.findIndex(s => s.person_id === pid)
+            if (stateIdx !== -1) {
+              memberStates.value[stateIdx] = {
+                ...memberStates.value[stateIdx],
+                last_action: data.data.action_label,
+                last_seen_time: data.data.timestamp,
+                last_location: data.data.environment?.room,
+                is_visible: true
+              }
             }
           }
         }
@@ -129,8 +134,15 @@ const connectWebSocket = () => {
   ws.onclose = () => console.log('InferenceView WS Disconnected')
 }
 
+const togglePause = () => {
+  isPaused.value = !isPaused.value
+  if (!isPaused.value) {
+    fetchData()
+  }
+}
+
 const fetchData = () => {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return
+  if (!ws || ws.readyState !== WebSocket.OPEN || isPaused.value) return
   isLoading.value = true
   ws.send(JSON.stringify({ type: 'db_query', query: 'member_states' }))
   ws.send(JSON.stringify({ type: 'db_query', query: 'recent_events', limit: 100 }))
@@ -185,7 +197,7 @@ const handleInference = async (data: any) => {
     analysisResult.value = result
   } catch (e: any) {
     console.error('Inference failed', e)
-    analysisResult.value = { error: '推論請求失敗: ' + e.message }
+    analysisResult.value = { error: t('inference.reqFailed') + ': ' + e.message }
   } finally {
     isAnalyzing.value = false
   }
@@ -225,41 +237,39 @@ const formatDate = (timestamp) => {
   <div class="h-full flex flex-col p-4 md:p-6 gap-6 overflow-hidden bg-bgDark">
     <!-- Header & Search -->
     <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
-      <div class="flex items-center gap-3">
-        <div class="w-2 h-6 bg-secondary rounded-full shadow-[0_0_12px_rgba(168,85,247,0.6)]"></div>
-        <div>
-          <h2 class="text-xl font-bold text-white tracking-tight">成員推論與動態</h2>
-          <p class="text-xs text-gray-500 font-medium uppercase tracking-widest">Member Inference & Activity</p>
-        </div>
+      <div class="relative group flex-1 max-w-md">
+        <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 group-focus-within:text-secondary transition-colors" />
+        <input 
+          v-model="searchQuery"
+          type="text" 
+          :placeholder="t('memory.searchPlaceholder')" 
+          class="bg-bgLight/50 border border-gray-700 rounded-xl py-2 pl-10 pr-4 text-sm text-white focus:outline-none focus:border-secondary/50 focus:ring-1 focus:ring-secondary/20 w-full transition-all"
+        />
       </div>
       
-      <div class="flex items-center gap-3">
-        <div class="relative group">
-          <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 group-focus-within:text-secondary transition-colors" />
-          <input 
-            v-model="searchQuery"
-            type="text" 
-            placeholder="搜尋成員或動作..." 
-            class="bg-bgLight/50 border border-gray-700 rounded-xl py-2 pl-10 pr-4 text-sm text-white focus:outline-none focus:border-secondary/50 focus:ring-1 focus:ring-secondary/20 w-full md:w-64 transition-all"
-          />
-        </div>
-        
-        <button 
-          @click="fetchData" 
-          class="p-2.5 bg-bgLight/50 text-gray-400 hover:text-white hover:bg-gray-700 border border-gray-700 rounded-xl transition-all shadow-lg"
-          :class="{'animate-spin text-secondary border-secondary/30': isLoading}"
-        >
-          <RefreshCw class="w-5 h-5" />
+      <button 
+        @click="togglePause" 
+        class="p-2 text-gray-400 hover:text-white hover:bg-gray-700/30 rounded-lg transition-all group cursor-pointer relative z-50 isolate"
+        :title="isPaused ? t('memory.resume') : t('memory.pause')"
+      >
+          <div class="pointer-events-none relative">
+            <RefreshCw 
+              class="w-5 h-5 transition-none" 
+              :class="[
+                isPaused ? 'text-gray-400' : 'text-secondary drop-shadow-[0_0_8px_rgba(168,85,247,0.8)] animate-[spin_3s_linear_infinite]',
+                {'animate-[spin_1s_linear_infinite]': isLoading && !isPaused}
+              ]"
+            />
+          </div>
         </button>
-      </div>
     </div>
 
     <!-- Member Cards List -->
     <div class="flex-1 overflow-y-auto pr-1 custom-scrollbar space-y-4 pb-10">
       <div v-if="filteredData.length === 0 && !isLoading" class="flex flex-col items-center justify-center py-20 text-gray-600">
         <UserX class="w-16 h-16 mb-4 opacity-20" />
-        <p class="text-lg font-medium">未找到相關成員資料</p>
-        <p class="text-sm opacity-60">請確認系統是否已開始接收數據</p>
+        <p class="text-lg font-medium">{{ t('inference.noData') }}</p>
+        <p class="text-sm opacity-60">{{ t('inference.checkSystem') }}</p>
       </div>
 
       <MemberInferenceCard 
@@ -279,7 +289,7 @@ const formatDate = (timestamp) => {
         <div class="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-800/50">
           <div class="flex items-center gap-2">
             <Brain class="w-5 h-5 text-secondary" />
-            <h3 class="font-bold text-white">行為分析報告</h3>
+            <h3 class="font-bold text-white">{{ t('inference.report') }}</h3>
           </div>
           <button @click="closeResultModal" class="text-gray-400 hover:text-white transition-colors">
             <X class="w-5 h-5" />
@@ -290,7 +300,7 @@ const formatDate = (timestamp) => {
         <div class="p-6 overflow-y-auto custom-scrollbar">
           <div v-if="isAnalyzing" class="flex flex-col items-center justify-center py-12 gap-4">
             <div class="w-12 h-12 border-4 border-secondary/30 border-t-secondary rounded-full animate-spin"></div>
-            <p class="text-gray-400 animate-pulse">正在分析行為數據...</p>
+            <p class="text-gray-400 animate-pulse">{{ t('inference.analyzing') }}</p>
           </div>
           
           <div v-else-if="analysisResult" class="space-y-6">
@@ -303,7 +313,7 @@ const formatDate = (timestamp) => {
               <div class="flex items-center justify-between mb-6">
                 <div>
                   <h4 class="text-2xl font-bold text-white mb-1">{{ analysisResult.member_name }}</h4>
-                  <p class="text-sm text-gray-500">分析事件數: {{ analysisResult.event_count }}</p>
+                  <p class="text-sm text-gray-500">{{ t('inference.eventCount') }}: {{ analysisResult.event_count }}</p>
                 </div>
                 <div class="text-right text-xs text-gray-500 font-mono">
                   <p>Start: {{ analysisResult.period?.start }}</p>
@@ -317,7 +327,8 @@ const formatDate = (timestamp) => {
                   Summary
                 </h5>
                 <div class="prose prose-invert max-w-none">
-                  <p class="text-gray-200 leading-relaxed whitespace-pre-line">{{ analysisResult.summary }}</p>
+                  <h3 class="text-xl font-bold text-secondary mb-4">{{ analysisResult.summary }}</h3>
+                  <p class="text-gray-200 leading-relaxed whitespace-pre-line">{{ analysisResult.detail || analysisResult.summary }}</p>
                 </div>
               </div>
             </div>
@@ -330,7 +341,7 @@ const formatDate = (timestamp) => {
             @click="closeResultModal"
             class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors text-sm font-medium"
           >
-            關閉
+            {{ t('common.confirm') }}
           </button>
         </div>
       </div>

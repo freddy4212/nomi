@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { Clock } from 'lucide-vue-next'
+import { useI18n } from '../composables/useI18n'
+
+const { t } = useI18n()
 
 defineProps<{
   selectedRange: { label: string, value: number }
@@ -22,7 +25,7 @@ const selectRange = (range: any) => {
       @click.stop="showRangePicker = !showRangePicker"
       class="p-2 text-gray-400 hover:text-primary hover:bg-gray-800 rounded-lg transition-colors flex items-center gap-2 cursor-pointer relative"
       :class="{'text-primary bg-gray-800': showRangePicker}"
-      title="選擇時間範圍"
+      :title="t('memory.selectTimeRange')"
     >
       <Clock class="w-5 h-5 pointer-events-none" />
     </button>

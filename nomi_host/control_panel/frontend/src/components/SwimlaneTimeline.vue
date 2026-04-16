@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { ChevronDown, ChevronUp } from 'lucide-vue-next'
+import { useI18n } from '../composables/useI18n'
+
+const { t, tDynamic } = useI18n()
 
 defineProps<{
   isOpen: boolean
@@ -23,12 +26,12 @@ defineEmits(['toggle'])
     >
       <div v-if="isOpen" class="w-full bg-bgLight/50 backdrop-blur-sm rounded-2xl border border-gray-700 overflow-hidden shadow-2xl flex flex-col">
         <div class="p-3 border-b border-gray-700 bg-gray-800/50 flex justify-between items-center">
-          <span class="text-xs text-gray-500">最新動態靠左</span>
+          <span class="text-xs text-gray-500">{{ t('timeline.latest') }}</span>
         </div>
         
         <div class="h-64 overflow-y-auto p-4 space-y-4 custom-scrollbar">
           <div v-if="events.length === 0" class="text-center text-gray-500 py-8 text-sm">
-            暫無動態
+            {{ t('timeline.noActivity') }}
           </div>
           
           <!-- Person Track -->
@@ -50,10 +53,10 @@ defineEmits(['toggle'])
                 <div class="w-40 bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-primary/50 rounded-lg p-2 transition-all cursor-default">
                   <div class="flex justify-between items-center mb-1">
                     <span class="text-[10px] font-mono text-gray-400 whitespace-pre-line leading-tight">{{ formatDate(event.timestamp) }}</span>
-                    <span class="text-[10px] px-1.5 rounded bg-primary/10 text-primary">{{ event.action_label }}</span>
+                    <span class="text-[10px] px-1.5 rounded bg-primary/10 text-primary">{{ tDynamic(event.action_label) }}</span>
                   </div>
                   <div class="flex justify-between items-end">
-                    <span class="text-xs text-gray-300 truncate max-w-[80px]" :title="event.environment?.room">{{ event.environment?.room || '未知' }}</span>
+                    <span class="text-xs text-gray-300 truncate max-w-[80px]" :title="event.environment?.room ? tDynamic(event.environment.room) : ''">{{ event.environment?.room ? tDynamic(event.environment.room) : t('perception.unknown') }}</span>
                     <span class="text-[10px] text-gray-500">{{ (event.action_confidence * 100).toFixed(0) }}%</span>
                   </div>
                 </div>

@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { Pencil, Trash2 } from 'lucide-vue-next'
+import { useI18n } from '../composables/useI18n'
+
+const { t } = useI18n()
 
 defineProps<{
   member: {
@@ -35,14 +38,14 @@ defineEmits(['select', 'edit', 'delete'])
       <button 
         @click.stop="$emit('edit', member)"
         class="w-8 h-8 flex items-center justify-center text-green-400 hover:text-green-300 bg-green-500/10 hover:bg-green-500/20 rounded-full border border-green-500/30 transition-colors" 
-        title="編輯成員"
+        :title="t('common.confirm')"
       >
         <Pencil class="w-4 h-4" />
       </button>
       <button 
         @click.stop="$emit('delete', member)"
         class="w-8 h-8 flex items-center justify-center text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 rounded-full border border-red-500/30 transition-colors" 
-        title="刪除成員"
+        :title="t('common.delete')"
       >
         <Trash2 class="w-4 h-4" />
       </button>
@@ -54,11 +57,11 @@ defineEmits(['select', 'edit', 'delete'])
     <!-- Details -->
     <div class="flex flex-col gap-1">
       <div class="flex items-center gap-2">
-        <span class="text-[11px] text-gray-500">樣本:</span>
+        <span class="text-[11px] text-gray-500">{{ t('memory.samples') }}:</span>
         <span class="text-[11px] text-primary font-bold">{{ member.sample_count || 0 }}</span>
       </div>
       <div class="flex items-center gap-2">
-        <span class="text-[10px] text-gray-500">更新:</span>
+        <span class="text-[10px] text-gray-500">{{ t('memory.updated') }}:</span>
         <span class="text-[10px] text-gray-400 font-mono">{{ formatDateInline(member.updated_at) }}</span>
       </div>
     </div>

@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { Wifi, Database, Server, Activity } from 'lucide-vue-next'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { useI18n } from '../composables/useI18n'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   tcpConnected: boolean
@@ -34,11 +37,11 @@ const getStatusColor = (connected: boolean, lastActive: number) => {
 }
 
 const getStatusText = (connected: boolean, lastActive: number) => {
-  if (!connected) return '未連線'
+  if (!connected) return t('common.disconnected')
   const delta = now.value - lastActive
-  if (delta < 0.5) return '傳輸中'
-  if (delta < 3.0) return '已連線 (閒置)'
-  return '已連線 (延遲)'
+  if (delta < 0.5) return t('common.active')
+  if (delta < 3.0) return t('common.idle')
+  return t('common.lagging')
 }
 </script>
 

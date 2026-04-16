@@ -18,7 +18,7 @@ psycopg2-binary>=2.9.0
 
 # Inference Layer (LLM)
 python-dotenv>=1.0.0
-google-generativeai>=0.3.0
+google-genai>=1.0.0
 
 # Device Simulator / Tools
 pyserial>=3.5

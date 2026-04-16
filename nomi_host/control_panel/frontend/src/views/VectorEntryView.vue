@@ -2,12 +2,14 @@
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { Camera, Save, Trash2, AlertCircle, CheckCircle2, Loader2, UserPlus, Info } from 'lucide-vue-next'
 import CameraStream from '../components/CameraStream.vue'
+import { useI18n } from '../composables/useI18n'
 
+const { t, locale } = useI18n()
 const name = ref('')
 const isRecording = ref(false)
 const progress = ref(0)
 const maxProgress = ref(30)
-const statusMessage = ref('請輸入成員名稱並確保畫面中只有一個人')
+const statusMessage = ref(t('setup.recordingDesc'))
 const statusType = ref('info') // info, success, error, recording
 const personCount = ref(0)
 
@@ -35,18 +37,18 @@ const connectWebSockets = () => {
           progress.value = data.progress
           maxProgress.value = data.max
           statusType.value = 'recording'
-          statusMessage.value = `正在錄製中... (${progress.value}/${maxProgress.value})`
+          statusMessage.value = `${t('setup.recordingProgress')} (${progress.value}/${maxProgress.value})`
         } else if (data.status === 'completed') {
           isRecording.value = false
           progress.value = 0
           statusType.value = 'success'
-          statusMessage.value = data.message || '錄製完成！'
+          statusMessage.value = data.message || t('setup.recordComplete')
           name.value = ''
         } else if (data.status === 'error') {
           isRecording.value = false
           progress.value = 0
           statusType.value = 'error'
-          statusMessage.value = data.message || '錄製失敗'
+          statusMessage.value = data.message || t('setup.recordFailed')
         }
       } else if (data.type === 'command_result' && data.command === 'start_recording') {
         if (!data.success) {
@@ -62,20 +64,20 @@ const connectWebSockets = () => {
 const startRecording = () => {
   if (!name.value.trim()) {
     statusType.value = 'error'
-    statusMessage.value = '請先輸入成員名稱'
+    statusMessage.value = t('setup.inputNameError')
     return
   }
   
   if (personCount.value !== 1) {
     statusType.value = 'error'
-    statusMessage.value = '畫面中必須剛好只有一個人才能開始錄製'
+    statusMessage.value = t('setup.personCountError')
     return
   }
 
   isRecording.value = true
   progress.value = 0
   statusType.value = 'recording'
-  statusMessage.value = '準備開始錄製...'
+  statusMessage.value = t('setup.preparing')
   
   dataWs.send(JSON.stringify({
     type: 'command',
@@ -94,7 +96,7 @@ const cancelRecording = () => {
   isRecording.value = false
   progress.value = 0
   statusType.value = 'info'
-  statusMessage.value = '已取消錄製'
+  statusMessage.value = t('setup.cancelled')
 }
 
 onMounted(() => {
@@ -133,7 +135,7 @@ const progressPercent = computed(() => (progress.value / maxProgress.value) * 10
         <div class="absolute top-4 left-4 px-3 py-1.5 rounded-full backdrop-blur-md border flex items-center gap-2 transition-all duration-300 z-20"
              :class="personCount === 1 ? 'bg-green-500/20 border-green-500/50 text-green-400' : 'bg-red-500/20 border-red-500/50 text-red-400'">
           <UserPlus class="w-4 h-4" />
-          <span class="text-xs font-bold">{{ personCount }} 人</span>
+          <span class="text-xs font-bold">{{ personCount }} {{ t('perception.person') }}</span>
         </div>
 
         <!-- Recording Overlay -->
@@ -148,7 +150,7 @@ const progressPercent = computed(() => (progress.value / maxProgress.value) * 10
             </svg>
             <div class="absolute text-2xl font-bold text-white">{{ Math.round((progress / maxProgress) * 100) }}%</div>
           </div>
-          <div class="mt-4 text-white font-bold tracking-wider animate-pulse">RECORDING...</div>
+          <div class="mt-4 text-white font-bold tracking-wider animate-pulse uppercase">{{ t('setup.recordingProgress') }}</div>
         </div>
       </div>
       
@@ -165,8 +167,7 @@ const progressPercent = computed(() => (progress.value / maxProgress.value) * 10
                 v-model="name"
                 type="text" 
                 class="w-full bg-bgDark/50 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-primary focus:ring-1 focus:ring-primary/20 focus:outline-none transition-all placeholder-gray-600 shadow-inner"
-                placeholder="輸入成員名稱..."
-                @keyup.enter="startRecording"
+                :placeholder="t('setup.enterNamePlaceholder')"
               >
               <!-- Status Message -->
               <div v-if="statusMessage && statusType !== 'info'" 

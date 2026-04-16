@@ -28,3 +28,6 @@ EPII_CM55M_APP_S/prebuilt_libs/**
 .pycache
 node_modules
 .env
+
+# NOMI Host
+nomi_host/virtual_endpoint_simulator/evaluation/results/*

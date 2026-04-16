@@ -9,6 +9,11 @@ import InferenceView from './views/InferenceView.vue'
 import SetupView from './views/SetupView.vue'
 import SettingsView from './views/SettingsView.vue'
 import IoTManagerView from './views/IoTManagerView.vue'
+import { useI18n } from './composables/useI18n'
+import { useTheme } from './composables/useTheme'
+
+const { t } = useI18n()
+useTheme()
 
 const currentModule = ref('perception')
 const currentTool = ref(null)
@@ -144,9 +149,9 @@ const closeTool = () => {
         <div class="flex items-center justify-between px-4 py-3 border-b border-gray-700 bg-gray-800/50">
           <span class="font-bold text-lg text-primary">
             {{ 
-              currentTool === 'iot' ? 'IoT裝置管理' :
-              currentTool === 'setup' ? '錄入與標定' : 
-              currentTool === 'settings' ? '系統設定' : '' 
+              currentTool === 'iot' ? t('nav.iot') :
+              currentTool === 'setup' ? t('nav.setup') : 
+              currentTool === 'settings' ? t('nav.settings') : '' 
             }}
           </span>
           <button @click="closeTool" class="md:hidden p-1 hover:bg-gray-700 rounded-full transition-colors">
