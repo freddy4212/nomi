@@ -122,43 +122,82 @@ class NOMIOrchestrator:
             while self.view_mode == "interpolated":
                 loop_start = time.time()
                 
-                if self._last_frame_data:
-                    # 使用線性獲取，避免智慧調速造成的卡頓
-                    interp_frame = self.skeleton_player.get_next_frame_linear()
+                # Check if we have any frame data or at least can generate a blank one
+                # If _last_frame_data is None but we have a skeleton_player that might have data, create a dummy frame_data
+                current_frame_data = self._last_frame_data
+                if current_frame_data is None:
+                     # Attempt to create a dummy frame data if we have skeleton data available to interpolate
+                     # This allows "skeleton only" mode to work in interpolation loop
+                     from observation_layer.modules.network.receiver import \
+                         FrameData
+
+                     # Need to make sure we don't break collect_status if basic_info is empty
+                     current_frame_data = FrameData(
+                        timestamp=time.time(),
+                        frame_no=0,
+                        image=None,
+                        keypoints=[],
+                        reid_results=[],
+                        basic_info={"device_id": "VIRTUAL_WE2"}, # Add default basic_info
+                        frame_info={"source": "dummy"}, # Add default frame_info
+                        environment={},
+                        raw_data={}
+                     )
+                
+                # 重要修復: 若是真實 frame_data 但 image 為 None (純骨架模式)，
+                # 且插值尚未準備好 (interp_frame 為 None)，
+                # 我們必須確保 render_frame 收到這個真實的 frame_data 以便透過 fallback 機制繪製 keypoints。
+                
+                # 使用線性獲取，避免智慧調速造成的卡頓
+                interp_frame = self.skeleton_player.get_next_frame_linear()
+                
+                # 如果沒有補幀資料，也沒 frame_data，就沒東西可畫，進入下一次迴圈
+                # 但如果有 frame_data (dummy 或 real)，我們可以畫黑底
+                # 這裡若 interp_frame 是 None，且 current_frame_data 是 dummy (無 image)，render_frame 會回 None
+                # 所以我們必須確保至少有一個是非空的，或者 render_frame 可以 handling None keypoints on dummy frame
+                
+                # 渲染 (如果沒有補幀資料，則退而求其次顯示原始 OSD)
+                # 重要: 如果 interp_frame 是 None，我們傳入 "overlay" 作為 view_mode
+                # DataProcessor.render_frame 必須能從 current_frame_data 中萃取 keypoints 來繪製
+                mode = "interpolated" if interp_frame else "overlay"
+                
+                rendered = DataProcessor.render_frame(
+                    current_frame_data, 
+                    interp_frame, 
+                    self.layers.observation_core, 
+                    mode, 
+                    None
+                )
                     
-                    # 渲染 (如果沒有補幀資料，則退而求其次顯示原始 OSD)
-                    rendered = DataProcessor.render_frame(
-                        self._last_frame_data, 
-                        interp_frame, 
-                        self.layers.observation_core, 
-                        "interpolated" if interp_frame else "overlay", 
-                        None
-                    )
-                    
-                    if rendered is not None:
-                        # 這裡我們手動呼叫 encode_image 並指定較低的品質
+                if rendered is not None:
+                    # 這裡我們手動呼叫 encode_image 並指定較低的品質
+                    try:
                         _, buf = cv2.imencode('.jpg', rendered, [cv2.IMWRITE_JPEG_QUALITY, 50])
                         img_b64 = base64.b64encode(buf).decode('utf-8')
-                        
-                        # 收集狀態
-                        status, events_written = DataProcessor.collect_status(
-                            self._last_frame_data, self.layers.observation_core, self.layers.memory_core,
-                            self.device_info, self._last_active_time, self._last_db_events_written,
-                            memory_config
-                        )
-                        self._last_db_events_written = events_written
-                        
-                        message = {
-                            "type": "frame_update", "timestamp": time.time(), "image": img_b64,
-                            "meta": status, "persons": self._get_persons_list(), "status": "running"
-                        }
-                        msg_str = json.dumps(message)
-                        
-                        if self._video_broadcast:
-                            await self._video_broadcast(msg_str)
-                        else:
-                            self._message_buffer = msg_str
-                
+                    except Exception as e:
+                        print(f"[Interpolation] Image encode error: {e}")
+                        img_b64 = ""
+                    
+                    # 收集狀態
+                    status, events_written = DataProcessor.collect_status(
+                        current_frame_data, self.layers.observation_core, self.layers.memory_core,
+                        self.device_info, self._last_active_time, self._last_db_events_written,
+                        memory_config
+                    )
+                    self._last_db_events_written = events_written
+                    
+                    message = {
+                        "type": "frame_update", "timestamp": time.time(), "image": img_b64,
+                        "meta": status, "persons": self._get_persons_list(), "status": "running"
+                    }
+                    msg_str = json.dumps(message)
+                    
+                    if self._video_broadcast:
+                        if self.loop:
+                            self.loop.call_soon_threadsafe(lambda: asyncio.create_task(self._video_broadcast(msg_str)))
+                    else:
+                        self._message_buffer = msg_str
+            
                 # 動態調整間隔
                 buf_status = self.skeleton_player.get_buffer_status()
                 remaining = buf_status.get("remaining", 0)
@@ -248,25 +287,20 @@ class NOMIOrchestrator:
 
     # ==================== 資料流處理 ====================
     def _on_frame_processed(self, frame_data, skeleton_frame):
-        # Cache frame data for interpolation loop
+        # Cache frame data for interpolation loop, even if image is missing
         self._last_frame_data = frame_data
+
+        # Explicitly handle missing image in frame_data for interpolation logic
+        if self._last_frame_data and self._last_frame_data.image is None:
+            # We construct a dummy-like frame_data within the interpolation loop
+            # But here we just ensure we stored the reference to the latest data
+            pass
 
         # Connect skeleton_player to processor (like GUI does)
         if self.layers.observation_core and self.layers.observation_core.skeleton_processor:
             if self.skeleton_player.processor is None:
                 self.skeleton_player.processor = self.layers.observation_core.skeleton_processor
                 print("[Orchestrator] SkeletonPlayer connected to processor")
-        
-        # If in interpolated mode, skip normal rendering/sending
-        # The interpolation loop will handle it
-        if self.view_mode == "interpolated":
-            # Ensure the loop is running (in case it wasn't started properly)
-            self._start_interpolation_loop()
-            return
-
-        # 1. 渲染與編碼
-        rendered = DataProcessor.render_frame(frame_data, skeleton_frame, self.layers.observation_core, self.view_mode, self.skeleton_player)
-        img_b64 = DataProcessor.encode_image(rendered)
         
         # 2. 更新快取
         self._update_device_cache(frame_data)
@@ -306,6 +340,18 @@ class NOMIOrchestrator:
                             })
                             self.loop.call_soon_threadsafe(lambda: self._on_event_update(msg))
 
+        # If in interpolated mode, skip normal rendering/sending
+        # The interpolation loop will handle it
+        if self.view_mode == "interpolated":
+            # Ensure the loop is running (in case it wasn't started properly)
+            self._start_interpolation_loop()
+            return
+            
+        # 1. 渲染與編碼
+        # 強制渲染，即便沒有 frame_data.image (render_frame 會處理生成全黑底圖)
+        rendered = DataProcessor.render_frame(frame_data, skeleton_frame, self.layers.observation_core, self.view_mode, self.skeleton_player)
+        img_b64 = DataProcessor.encode_image(rendered)
+        
         # 4. 收集狀態並組裝
         status, events_written = DataProcessor.collect_status(
             frame_data, self.layers.observation_core, self.layers.memory_core,
@@ -318,7 +364,13 @@ class NOMIOrchestrator:
             "type": "frame_update", "timestamp": time.time(), "image": img_b64,
             "meta": status, "persons": self._get_persons_list(), "status": "running"
         }
-        self._message_buffer = json.dumps(message)
+        if self._video_broadcast:
+            # If broadcast callback is available (Direct mode), send immediately
+            if self.loop:
+                self.loop.call_soon_threadsafe(lambda: asyncio.create_task(self._video_broadcast(json.dumps(message))))
+        else:
+            # Fallback to polling buffer
+            self._message_buffer = json.dumps(message)
 
     def _on_action_recognized(self, actions): self._latest_actions = actions
 

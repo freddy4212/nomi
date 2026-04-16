@@ -165,26 +165,27 @@ class InferenceRequest(BaseModel):
     member_id: int
     start_time: float
     end_time: float
+    skeleton_only: bool = False  # Phase A (pure skeleton) vs Phase B (skeleton + env)
 
 @app.post("/api/inference/analyze")
 async def analyze_activity(request: InferenceRequest):
     """
-    分析指定成員在特定時間段的活動
+    分析指定成員在特定時間段的活動。
+    skeleton_only=True: 剝除環境資料，純骨架分析（Phase A）
+    skeleton_only=False: 完整多模態分析（Phase B, 預設）
     """
     if not orchestrator.layers.memory_core:
         return {"error": "Memory layer not active"}
     
     from inference_layer.modules.analysis import ActivityAnalyzer
-    
-    # Initialize analyzer with the current DB connection
-    # 注意: 這裡每次請求都建立實例可能不是最高效，但考慮到 API Key 可能變動或簡單性，暫時這樣做
-    # 如果需要優化，可以改為全域單例
+
     analyzer = ActivityAnalyzer(orchestrator.layers.memory_core._db)
     
     result = await analyzer.analyze_period(
         request.member_id,
         request.start_time,
-        request.end_time
+        request.end_time,
+        skeleton_only=request.skeleton_only,
     )
     
     return result
