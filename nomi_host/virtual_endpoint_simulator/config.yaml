@@ -1,0 +1,10 @@
+# Virtual Endpoint Simulator Configuration
+
+dataset:
+  # Path to the directory containing .skeleton files
+  # Can be absolute or relative to the simulator root
+  path: "/Users/freddy/Documents/260213_NOMI_evaluation/NTU_RGB/nturgb+d_skeletons"
+
+server:
+  host: "0.0.0.0"
+  port: 8000
