@@ -854,7 +854,10 @@ static void dp_app_cv_yolov8_pose_eventhdl_cb(EVT_INDEX_E event)
 	if(g_inp1bitparer_abnormal == 1 || g_wdt1_timeout == 1 || g_wdt2_timeout == 1 || g_wdt3_timeout == 1
 			|| g_cdm_fifoerror == 1 || g_xdma_abnormal == 1 || g_hxautoi2c_error == 1)
 	{
+		dbg_printf(DBG_LESS_INFO, "Abnormal event detected, restarting sensor...\n");
 		cisdp_sensor_stop();
+		dp_var_int();
+		cisdp_sensor_start();
 	}
 }
 
