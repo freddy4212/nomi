@@ -17,7 +17,7 @@ NOMI Host 端採用模組化架構設計，由 **Control Panel** 統一調度：
 3.  **記憶層 (Memory Layer)**: 負責長期記憶儲存，使用 PostgreSQL + TimescaleDB + pgvector。
     *   目錄: `memory_layer/`
 4.  **裝置模擬器 (Device Simulator)**: 用於開發測試，模擬 WiseEye2 發送資料。
-    *   目錄: `device_simulator/`
+    *   目錄: `../nomi_evaluation/device_simulator/`
 
 ---
 
@@ -44,29 +44,51 @@ pip install -r requirements.txt
 
 ### 3. 啟動系統 (Control Panel)
 
-現在您只需要啟動 Control Panel 的後端與前端，系統會自動管理其他子模組。
+建議使用一鍵啟動腳本：
 
-**終端機 A - 啟動後端 Orchestrator**
-這將會自動啟動感知層接收資料，並開啟 WebSocket 服務 (Port 8000)。
 ```bash
 # 確保在 nomi_host 目錄下
-python -m control_panel.backend.main
+bash ./start.sh
 ```
 
-**終端機 B - 啟動前端 Web Console**
+此腳本會自動完成以下動作：
+
+1. 啟動 `memory_layer/container/start.sh`（Podman/Docker + PostgreSQL）
+2. 自動選擇可用後端埠（預設在 8000-8099 中找空位）
+3. 自動選擇可用前端埠（預設在 5173-5199 中找空位，5173 被占用會改用 5174）
+4. 將正確後端埠寫入 `control_panel/frontend/.env.local`
+5. 啟動後端 `python -m control_panel.backend.main`
+6. 啟動前端 `npm run dev -- --port <frontend_port>`
+
+啟動後，請用瀏覽器開啟前端顯示的網址（通常是 `http://localhost:5173`）。
+
+如果想手動指定後端埠，可在啟動時帶入環境變數：
 
 ```bash
-# 進入前端目錄
-cd control_panel/frontend
-
-# 安裝依賴 (初次執行需執行)
-npm install
-
-# 啟動開發伺服器
-npm run dev
+NOMI_BACKEND_PORT=8005 bash ./start.sh
 ```
 
-啟動後，請用瀏覽器開啟顯示的網址 (通常為 `http://localhost:5173`)。
+也可指定前端埠：
+
+```bash
+NOMI_FRONTEND_PORT=5179 bash ./start.sh
+```
+
+### 3.1 手動啟動（進階）
+
+若需要分開啟動，也可手動執行：
+
+```bash
+# A. 啟動資料庫容器
+bash ./memory_layer/container/start.sh
+
+# B. 啟動後端（可自訂埠）
+NOMI_BACKEND_PORT=8005 python -m control_panel.backend.main
+
+# C. 啟動前端
+cd control_panel/frontend
+npm run dev
+```
 
 ### 4. (選用) 啟動裝置模擬器
 
@@ -74,6 +96,7 @@ npm run dev
 
 **終端機 C - 啟動模擬器**
 ```bash
+cd ../nomi_evaluation
 python -m device_simulator.main
 ```
 在模擬器視窗中點擊 **「開始發送」** 即可。
@@ -91,7 +114,7 @@ python -m device_simulator.main
 *   `memory_layer/`: **記憶核心** (Python)
     *   管理 PostgreSQL 資料庫連線。
     *   處理 ReID 特徵向量的儲存與檢索。
-*   `device_simulator/`: **裝置模擬器** (Python)
+*   `../nomi_evaluation/device_simulator/`: **裝置模擬器** (Python)
     *   使用 YOLO-Pose 從影片產生骨架資料，模擬真實裝置行為。
 
 ## 授權

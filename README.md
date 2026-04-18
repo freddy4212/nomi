@@ -15,6 +15,7 @@ NOMI 是一個基於 Himax WiseEye2 (Grove Vision AI V2) 的家庭智能感知�
 ## 📂 專案結構
 
 - `nomi_host/`: 系統核心，包含後端 Orchestrator 與前端 Web Console。
+- `nomi_evaluation/`: 評估與模擬工具，目前包含 `device_simulator/`。
 - `EPII_CM55M_APP_S/`: WiseEye2 韌體原始碼。
 - `model_zoo/`: 預訓練模型庫 (TFLite)。
 - `we2_image_gen_local/`: 韌體影像生成工具。
