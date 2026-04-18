@@ -5,6 +5,7 @@ import { useI18n } from '../composables/useI18n'
 import MemberCard from '../components/MemberCard.vue'
 import EventsTable from '../components/EventsTable.vue'
 import TimeRangePicker from '../components/TimeRangePicker.vue'
+import { buildWsUrl } from '../utils/backend'
 
 const emit = defineEmits(['status-update'])
 const { t } = useI18n()
@@ -94,10 +95,8 @@ const togglePause = () => {
 }
 
 const connectWebSocket = () => {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const host = window.location.hostname
   // Use dedicated data channel
-  ws = new WebSocket(`${protocol}//${host}:8000/ws/data`)
+  ws = new WebSocket(buildWsUrl('/ws/data'))
   
   ws.onopen = () => {
     console.log('MemoryView WS Connected (Data Channel)')

@@ -3,6 +3,7 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { Play, Square, Trash2, Languages, Sun, Moon } from 'lucide-vue-next'
 import { useI18n } from '../composables/useI18n'
 import { useTheme } from '../composables/useTheme'
+import { buildWsUrl } from '../utils/backend'
 
 const { t, locale, toggleLocale } = useI18n()
 const { theme, toggleTheme } = useTheme()
@@ -13,10 +14,8 @@ const isDbLoading = ref(false)
 let ws: WebSocket | null = null
 
 const connectWebSocket = () => {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const host = window.location.hostname
   // Use dedicated data channel for commands
-  ws = new WebSocket(`${protocol}//${host}:8000/ws/data`)
+  ws = new WebSocket(buildWsUrl('/ws/data'))
   
   ws.onopen = () => {
     console.log('Settings WS Connected (Data Channel)')

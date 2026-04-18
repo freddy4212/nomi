@@ -194,18 +194,20 @@ async def analyze_activity(request: InferenceRequest):
 # --- 主函式 ---
 def main():
     """啟動後端服務"""
+    backend_port = int(os.getenv("NOMI_BACKEND_PORT", "8000"))
+
     print("=" * 50)
     print("   NOMI Control Panel - Backend v2.0")
     print("=" * 50)
-    print("Starting WebSocket Server on 0.0.0.0:8000")
+    print(f"Starting WebSocket Server on 0.0.0.0:{backend_port}")
     print("")
     print("Endpoints:")
-    print("  - WS Video: ws://localhost:8000/ws/video")
-    print("  - WS Data:  ws://localhost:8000/ws/data")
-    print("  - Health:   http://localhost:8000/health")
+    print(f"  - WS Video: ws://localhost:{backend_port}/ws/video")
+    print(f"  - WS Data:  ws://localhost:{backend_port}/ws/data")
+    print(f"  - Health:   http://localhost:{backend_port}/health")
     print("")
     
-    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
+    uvicorn.run(app, host="0.0.0.0", port=backend_port, log_level="info")
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { User, Brain, ChevronRight, ChevronDown, Clock, MapPin, X, Loader } from 'lucide-vue-next'
 import { useI18n } from '../composables/useI18n'
+import { buildApiUrl } from '../utils/backend'
 
 const props = defineProps<{
   member: {
@@ -168,7 +169,7 @@ const startInference = async () => {
     // Handle unknown member ID
     const memberId = props.member.id === 'unknown' ? 0 : parseInt(props.member.id as string)
     
-    const response = await fetch(`http://${window.location.hostname}:8000/api/inference/analyze`, {
+    const response = await fetch(buildApiUrl('/api/inference/analyze'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'

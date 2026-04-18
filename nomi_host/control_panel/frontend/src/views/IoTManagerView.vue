@@ -7,6 +7,7 @@ import {
   Box, Waves, Disc, Lock, Pencil, Trash2,
   Columns, Bell, Fan
 } from 'lucide-vue-next'
+import { buildApiUrl } from '../utils/backend'
 
 const { t } = useI18n()
 const devices = ref<any[]>([])
@@ -38,8 +39,7 @@ const getIcon = (iconName: string) => {
 const fetchDevices = async () => {
   loading.value = true
   try {
-    const host = window.location.hostname
-    const response = await fetch(`http://${host}:8000/api/iot/devices`)
+    const response = await fetch(buildApiUrl('/api/iot/devices'))
     if (response.ok) {
       devices.value = await response.json()
     }

@@ -3,6 +3,7 @@ import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { Camera, Save, Trash2, AlertCircle, CheckCircle2, Loader2, UserPlus, Info } from 'lucide-vue-next'
 import CameraStream from '../components/CameraStream.vue'
 import { useI18n } from '../composables/useI18n'
+import { buildWsUrl } from '../utils/backend'
 
 const { t, locale } = useI18n()
 const name = ref('')
@@ -20,13 +21,10 @@ const handleFrameUpdate = (data) => {
 }
 
 const connectWebSockets = () => {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const host = window.location.hostname
-  
   console.log('VectorEntryView: Connecting to WebSockets...')
 
   // Data Channel
-  dataWs = new WebSocket(`${protocol}//${host}:8000/ws/data`)
+  dataWs = new WebSocket(buildWsUrl('/ws/data'))
   dataWs.onmessage = (event) => {
     try {
       const data = JSON.parse(event.data)

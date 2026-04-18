@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, defineEmits, defineProps, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { Activity, Info, Settings2 } from 'lucide-vue-next'
+import { buildWsUrl } from '../utils/backend'
 
 const props = defineProps({
   showInfoButton: {
@@ -66,11 +67,8 @@ const closeMenu = () => {
 }
 
 const connectWebSocket = () => {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const host = window.location.hostname
-  
   // Video Channel
-  ws = new WebSocket(`${protocol}//${host}:8000/ws/video`)
+  ws = new WebSocket(buildWsUrl('/ws/video'))
   
   ws.onopen = () => {
     isConnected.value = true
@@ -118,7 +116,7 @@ const connectWebSocket = () => {
 
   // Data Channel (for commands)
   if (props.allowModeSwitch) {
-    dataWs = new WebSocket(`${protocol}//${host}:8000/ws/data`)
+    dataWs = new WebSocket(buildWsUrl('/ws/data'))
     dataWs.onopen = () => {
       console.log('CameraStream Data WS Connected')
       // Set initial mode

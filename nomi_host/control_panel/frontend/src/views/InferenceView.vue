@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, defineEmits, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { RefreshCw, Brain, Activity, Search, Filter, UserX, X, Info } from 'lucide-vue-next'
 import { useI18n } from '../composables/useI18n'
 import MemberInferenceCard from '../components/MemberInferenceCard.vue'
+import { buildApiUrl, buildWsUrl } from '../utils/backend'
 
 const emit = defineEmits(['status-update'])
 const { t } = useI18n()
@@ -84,9 +85,7 @@ const filteredData = computed(() => {
 })
 
 const connectWebSocket = () => {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const host = window.location.hostname
-  ws = new WebSocket(`${protocol}//${host}:8000/ws/data`)
+  ws = new WebSocket(buildWsUrl('/ws/data'))
   
   ws.onopen = () => {
     console.log('InferenceView WS Connected')
@@ -181,7 +180,7 @@ const handleInference = async (data: any) => {
     // Handle unknown member ID
     const memberId = data.memberId === 'unknown' ? 0 : parseInt(data.memberId)
     
-    const response = await fetch(`http://${window.location.hostname}:8000/api/inference/analyze`, {
+    const response = await fetch(buildApiUrl('/api/inference/analyze'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
