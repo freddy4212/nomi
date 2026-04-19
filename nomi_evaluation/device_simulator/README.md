@@ -40,7 +40,7 @@ device_simulator/
 ### 啟動發射端
 
 ```bash
-cd /path/to/sscma-example-we2/nomi_evaluation
+cd /path/to/nomi_evaluation
 python -m device_simulator.main
 ```
 

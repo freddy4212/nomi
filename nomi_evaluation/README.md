@@ -10,13 +10,13 @@
 ## 啟動 Device Simulator
 
 ```bash
-cd nomi_evaluation
+# 在 nomi_evaluation repo 根目錄下
 python -m device_simulator.main
 ```
 
 ## 啟動 Virtual Endpoint Simulator
 
 ```bash
-cd nomi_evaluation/virtual_endpoint_simulator
+cd virtual_endpoint_simulator
 bash start.sh
 ```

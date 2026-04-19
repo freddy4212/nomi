@@ -17,7 +17,7 @@ NOMI Host 端採用模組化架構設計，由 **Control Panel** 統一調度：
 3.  **記憶層 (Memory Layer)**: 負責長期記憶儲存，使用 PostgreSQL + TimescaleDB + pgvector。
     *   目錄: `memory_layer/`
 4.  **裝置模擬器 (Device Simulator)**: 用於開發測試，模擬 WiseEye2 發送資料。
-    *   目錄: `../nomi_evaluation/device_simulator/`
+    *   來源: `nomi_evaluation` repo 的 `device_simulator/` 模組（可獨立啟動）
 
 ---
 
@@ -58,7 +58,6 @@ cp config.template.yaml config.yaml
 llm:
     api_key: "YOUR_GEMINI_API_KEY"
     model_name: "models/gemini-3-flash-preview"
-    judge_model: "gemini-2.5-flash"
 ```
 
 注意：`config.yaml` 已加入 `.gitignore`，不會被提交。請提交 `config.template.yaml` 供他人同步模板。
@@ -117,7 +116,7 @@ npm run dev
 
 **終端機 C - 啟動模擬器**
 ```bash
-cd ../nomi_evaluation
+# 在 nomi_evaluation repo 根目錄下執行
 python -m device_simulator.main
 ```
 在模擬器視窗中點擊 **「開始發送」** 即可。
@@ -135,7 +134,7 @@ python -m device_simulator.main
 *   `memory_layer/`: **記憶核心** (Python)
     *   管理 PostgreSQL 資料庫連線。
     *   處理 ReID 特徵向量的儲存與檢索。
-*   `../nomi_evaluation/device_simulator/`: **裝置模擬器** (Python)
+*   外部 `nomi_evaluation` repo 的 `device_simulator/`: **裝置模擬器** (Python)
     *   使用 YOLO-Pose 從影片產生骨架資料，模擬真實裝置行為。
 
 ## 授權

@@ -28,7 +28,7 @@
 
 1. 安裝後端依賴：
    ```bash
-   cd nomi_evaluation/virtual_endpoint_simulator
+   cd virtual_endpoint_simulator
    python3 -m venv .venv
    source .venv/bin/activate
    pip install -r requirements.txt

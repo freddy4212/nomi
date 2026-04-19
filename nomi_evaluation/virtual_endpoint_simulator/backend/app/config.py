@@ -15,28 +15,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger("config")
 
-# Calculate project root dynamically by searching upwards
+# Calculate roots dynamically (works in standalone repo or monorepo)
 current_file = Path(__file__).resolve()
-project_root = None
 
-# Simulator Root (where config.yaml resides) should be 'nomi_evaluation/virtual_endpoint_simulator'
-# We are in 'nomi_evaluation/virtual_endpoint_simulator/backend/app/config.py'
-# So simulator root is ../..
+# Simulator Root (where config.yaml resides): nomi_evaluation/virtual_endpoint_simulator
 simulator_root = current_file.parents[2]
 
-# Search for the marker "3d_skeleton" directory in parent directories for WORKSPACE root
-for parent in current_file.parents:
-    if (parent / "3d_skeleton").exists():
-        project_root = parent
-        break
-    if (parent / "sscma-example-we2").exists():
-        pass
-
-if not project_root:
-    try:
-        project_root = current_file.parents[4]
-    except IndexError:
-        project_root = current_file.parent
+# Optional workspace root candidate when running inside a larger monorepo
+project_root = simulator_root.parent.parent if len(simulator_root.parents) >= 2 else None
 
 # 1. Try to load config.yaml
 config_yaml_path = simulator_root / "config.yaml"
@@ -81,17 +67,19 @@ yaml_orange4home_path = _yaml_dataset_path("orange4home_dir")
 yaml_dalton_path = _yaml_dataset_path("dalton_dir")
 
 # Try to find the skeleton directory
+env_ntu_path = os.getenv("NTU_SKELETON_DIR")
+workspace_ntu_path = str(project_root / "3d_skeleton" / "skeleton") if project_root else None
+local_ntu_path = str(simulator_root / "datasets" / "ntu_skeletons")
+
 possible_paths = [
     # 0. YAML Config (Highest Priority)
     yaml_ntu_path,
     # 1. Environment variable
-    os.getenv("NTU_SKELETON_DIR"),
+    env_ntu_path,
     # 2. Standard location in workspace
-    str(project_root / "3d_skeleton" / "skeleton") if project_root else None,
-    # 3. Fallback: look relative to current file (for testing)
-    str(current_file.parent / "../../../../../3d_skeleton/skeleton"),
-    # 4. Hardcoded known path
-    "/Users/freddy/Documents/251006_WiseEye2/sscma-example-we2/3d_skeleton/skeleton"
+    workspace_ntu_path,
+    # 3. Local standalone default directory
+    local_ntu_path,
 ]
 
 final_path = None
@@ -104,13 +92,8 @@ if final_path:
     DEFAULT_DATASET_DIR = final_path.resolve()
     logger.info(f"Found dataset directory at: {DEFAULT_DATASET_DIR}")
 else:
-    # Fallback to the original hardcoded path if nothing found (legacy behavior)
-    DEFAULT_DATASET_DIR = Path(
-        os.getenv(
-            "NTU_SKELETON_DIR",
-            "/Users/freddy/Documents/260213_NOMI_evaluation/NTU_RGB/nturgb+d_skeletons",
-        )
-    )
+    # Keep a deterministic fallback without machine-specific hardcoded paths
+    DEFAULT_DATASET_DIR = Path(env_ntu_path or local_ntu_path)
     logger.warning(f"Could not find dataset in standard locations. Using fallback: {DEFAULT_DATASET_DIR}")
 
 # Orange4Home Config
@@ -118,7 +101,7 @@ ORANGE4HOME_DIR = Path(
     yaml_orange4home_path
     or os.getenv(
         "ORANGE4HOME_DIR",
-        "/Users/freddy/Documents/260213_NOMI_evaluation/Orange4Home/orange4home"
+        str(simulator_root / "datasets" / "orange4home")
     )
 )
 logger.info(f"Using Orange4Home Dir: {ORANGE4HOME_DIR}")
@@ -128,7 +111,7 @@ DALTON_DIR = Path(
     yaml_dalton_path
     or os.getenv(
         "DALTON_DIR",
-        "/Users/freddy/Documents/260213_NOMI_evaluation/DALTON/dalton-dataset-files"
+        str(simulator_root / "datasets" / "dalton")
     )
 )
 logger.info(f"Using DALTON Dir: {DALTON_DIR}")
@@ -140,6 +123,10 @@ GEMINI_JUDGE_MODEL = str(yaml_llm.get("judge_model", GEMINI_MODEL_NAME)).strip()
 
 if GEMINI_API_KEY:
     logger.info(f"LLM config loaded (model={GEMINI_MODEL_NAME}, judge_model={GEMINI_JUDGE_MODEL})")
+    if config_yaml_path.exists():
+        logger.warning(
+            "config.yaml contains llm.api_key. Keep this file local and do not commit it to Git."
+        )
 else:
     logger.warning("LLM config missing: llm.api_key is empty in config.yaml")
 

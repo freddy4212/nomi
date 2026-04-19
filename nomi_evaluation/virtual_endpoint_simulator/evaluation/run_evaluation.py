@@ -1051,7 +1051,7 @@ def main():
         cprint(f"  ✅ Simulator: connected (running={status.get('is_running', False)})", Colors.GREEN)
     except Exception as e:
         cprint(f"  ❌ Simulator not reachable at {sim_url}: {e}", Colors.RED)
-        cprint(f"     Start it with: cd nomi_evaluation/virtual_endpoint_simulator && bash start.sh", Colors.DIM)
+        cprint(f"     Start it with: cd virtual_endpoint_simulator && bash start.sh", Colors.DIM)
         sys.exit(1)
 
     nomi_ok = nomi.health_check()

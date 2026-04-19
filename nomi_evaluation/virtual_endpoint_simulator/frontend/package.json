@@ -13,6 +13,8 @@
     "axios": "^1.6.0",
     "echarts": "^6.0.0",
     "quasar": "^2.16.0",
+    "vis-data": "^8.0.3",
+    "vis-timeline": "^8.5.0",
     "vue": "^3.3.0",
     "vue-echarts": "^8.0.1"
   },

@@ -28,7 +28,7 @@ observation_layer/
 ### 啟動接收端
 
 ```bash
-cd /path/to/sscma-example-we2
+cd /path/to/nomi_host
 python -m observation_layer.main
 ```
 
@@ -51,7 +51,7 @@ port = 9527         # 監聽埠號
 ## 與發射端配合使用
 
 1. 先啟動本接收端程式
-2. 再啟動 `../nomi_evaluation/device_simulator` 發射端程式
+2. 再啟動 `nomi_evaluation` repo 的 `device_simulator` 發射端程式
 3. 接收端會自動連接到發射端
 4. 切換發射端的資料來源（Serial/Webcam）即可看到資料
 

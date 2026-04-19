@@ -31,7 +31,7 @@
 |------|------|------|
 | **observation_layer** | `observation_layer/` | **主要感知層**，透過網路接收骨架資料 |
 | **we_mma_2** | `we_mma_2/` | 核心框架，包含動作識別、骨架處理等核心功能 |
-| **device_simulator** | `../nomi_evaluation/device_simulator/` | 發送端，從攝影機/測試來源發送骨架資料 |
+| **device_simulator** | `nomi_evaluation/device_simulator/` | 發送端，從攝影機/測試來源發送骨架資料（外部 repo，可獨立執行） |
 | **memory_bridge** | `we_mma_2/memory_bridge.py` | 橋接模組，連接感知層與記憶層 |
 | **memory_layer** | `memory_layer/` | 記憶層核心，資料庫管理與持久化 |
 
@@ -314,7 +314,7 @@ memory_layer.stop()
 
 ```bash
 # 主要使用方式（網路接收）
-cd sscma-example-we2
+cd /path/to/nomi_host
 python -m observation_layer.main
 
 # 串口直連模式
@@ -409,7 +409,7 @@ config = MemoryConfig(
 
 確保從專案根目錄執行，或將專案加入 `PYTHONPATH`：
 ```bash
-export PYTHONPATH="${PYTHONPATH}:/path/to/sscma-example-we2"
+export PYTHONPATH="${PYTHONPATH}:/path/to/nomi_host"
 ```
 
 ### PostgreSQL 連線失敗
