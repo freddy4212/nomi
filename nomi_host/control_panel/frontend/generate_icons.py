@@ -3,9 +3,10 @@ import shutil
 
 from PIL import Image
 
-# Paths
-source_dir = "/Users/freddy/Documents/251006_WiseEye2/sscma-example-we2/nomi_host/documents/nomi_logo/Color"
-dest_dir = "/Users/freddy/Documents/251006_WiseEye2/sscma-example-we2/nomi_host/control_panel/frontend/public"
+# Paths (relative to this script)
+base_dir = os.path.dirname(os.path.abspath(__file__))
+source_dir = os.path.join(base_dir, "logo_source")
+dest_dir = os.path.join(base_dir, "public")
 
 icon_source = os.path.join(source_dir, "I_Solid_Color.png")
 logo_source = os.path.join(source_dir, "H_Standard_Color.svg")
