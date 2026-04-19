@@ -42,6 +42,27 @@ NOMI Host 端採用模組化架構設計，由 **Control Panel** 統一調度：
 pip install -r requirements.txt
 ```
 
+### 2.1 設定 LLM 金鑰 (config.yaml)
+
+`inference_layer` 會從 `nomi_host/config.yaml` 讀取 LLM 設定。
+
+請先複製模板：
+
+```bash
+cp config.template.yaml config.yaml
+```
+
+然後編輯 `config.yaml`：
+
+```yaml
+llm:
+    api_key: "YOUR_GEMINI_API_KEY"
+    model_name: "models/gemini-3-flash-preview"
+    judge_model: "gemini-2.5-flash"
+```
+
+注意：`config.yaml` 已加入 `.gitignore`，不會被提交。請提交 `config.template.yaml` 供他人同步模板。
+
 ### 3. 啟動系統 (Control Panel)
 
 建議使用一鍵啟動腳本：

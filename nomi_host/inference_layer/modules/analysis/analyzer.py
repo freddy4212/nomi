@@ -1,24 +1,40 @@
 import json
-import os
+from pathlib import Path
 from typing import Any, Dict, List
 
-from dotenv import load_dotenv
+import yaml
 from google import genai
 from google.genai import types
 
-# Load environment variables from .env file
-load_dotenv()
+def _load_llm_config() -> Dict[str, str]:
+    """Load LLM settings from nomi_host/config.yaml."""
+    config_path = Path(__file__).resolve().parents[3] / "config.yaml"
+    if not config_path.exists():
+        return {}
+
+    try:
+        with config_path.open("r", encoding="utf-8") as f:
+            config = yaml.safe_load(f) or {}
+    except Exception as e:
+        print(f"[ActivityAnalyzer] Warning: failed to read {config_path}: {e}")
+        return {}
+
+    llm_config = config.get("llm", {}) if isinstance(config, dict) else {}
+    if not isinstance(llm_config, dict):
+        return {}
+    return llm_config
 
 class ActivityAnalyzer:
     def __init__(self, db_connector):
         self.db = db_connector
-        self.api_key = os.getenv("GEMINI_API_KEY")
-        self.model_name = os.getenv("GEMINI_MODEL_NAME", "gemini-1.5-flash")
+        llm_config = _load_llm_config()
+        self.api_key = str(llm_config.get("api_key", "")).strip()
+        self.model_name = str(llm_config.get("model_name", "gemini-1.5-flash")).strip()
         
         if self.api_key:
             self.client = genai.Client(api_key=self.api_key)
         else:
-            print("[ActivityAnalyzer] Warning: GEMINI_API_KEY not found.")
+            print("[ActivityAnalyzer] Warning: llm.api_key not found in config.yaml.")
             self.client = None
 
     async def analyze_period(
