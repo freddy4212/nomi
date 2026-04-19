@@ -10,7 +10,6 @@ Evaluation Service  —  三大類五場景研究設計
 import asyncio
 import json
 import logging
-import os
 import random
 import time
 from datetime import datetime
@@ -25,10 +24,7 @@ try:
 except ImportError:
     HAS_GENAI = False
 
-from dotenv import load_dotenv
-
-_env_path = Path(__file__).resolve().parents[3] / ".env"
-load_dotenv(_env_path)
+from ..config import GEMINI_API_KEY, GEMINI_JUDGE_MODEL, GEMINI_MODEL_NAME
 
 logger = logging.getLogger("evaluation_service")
 
@@ -489,12 +485,9 @@ class LLMJudge:
     """Manages Gemini client for both semantic label scoring and full evaluation."""
 
     def __init__(self):
-        self.api_key = os.getenv("GEMINI_API_KEY")
-        # Judge uses a separate model (defaults to stable gemini-2.0-flash)
-        self.model_name = os.getenv(
-            "GEMINI_JUDGE_MODEL",
-            os.getenv("GEMINI_MODEL_NAME", "gemini-2.0-flash")
-        )
+        self.api_key = GEMINI_API_KEY
+        # Judge uses a separate model (falls back to base model)
+        self.model_name = GEMINI_JUDGE_MODEL or GEMINI_MODEL_NAME or "gemini-2.0-flash"
         self.client = None
         self.enabled = False
         self._call_count = 0
@@ -1216,11 +1209,8 @@ def rescore_results(results: Dict, use_llm: bool = True) -> Dict:
     client = None
     model_name = None
     if use_llm and HAS_GENAI:
-        api_key = os.getenv("GEMINI_API_KEY")
-        model_name = os.getenv(
-            "GEMINI_JUDGE_MODEL",
-            os.getenv("GEMINI_MODEL_NAME", "gemini-2.0-flash")
-        )
+        api_key = GEMINI_API_KEY
+        model_name = GEMINI_JUDGE_MODEL or GEMINI_MODEL_NAME or "gemini-2.0-flash"
         if api_key:
             try:
                 client = genai.Client(api_key=api_key)

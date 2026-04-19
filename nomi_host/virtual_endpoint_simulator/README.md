@@ -21,6 +21,11 @@
 
 ### 初始化
 
+0. 建立本機設定檔：
+   ```bash
+   cp config.template.yaml config.yaml
+   ```
+
 1. 安裝後端依賴：
    ```bash
    cd config/virtual_endpoint_simulator
@@ -56,11 +61,50 @@
 
 ## 可調整資料集路徑
 
-預設會讀取：
-`/Users/freddy/Documents/260213_NOMI_evaluation/NTU_RGB/nturgb+d_skeletons`
+目前支援三個資料集路徑，皆可在 `config.yaml` 中分別設定：
 
-若需改路徑，啟動前設定：
+- NTU skeleton：`datasets.ntu_skeleton_dir`
+- Orange4Home：`datasets.orange4home_dir`
+- DALTON：`datasets.dalton_dir`
+
+範例：
+
+```yaml
+datasets:
+   ntu_skeleton_dir: "/path/to/NTU_RGB/nturgb+d_skeletons"
+   orange4home_dir: "/path/to/Orange4Home/orange4home"
+   dalton_dir: "/path/to/DALTON/dalton-dataset-files"
+```
+
+路徑可使用絕對路徑，或相對於 `config.yaml` 所在目錄的相對路徑。
+
+若需改路徑，直接修改 `config.yaml`。
+
+## LLM as a Judge 設定（YAML）
+
+LLM Judge 現在固定從 `config.yaml` 讀取，不再讀取 `.env`。
+
+設定位置：
+
+- `llm.api_key`
+- `llm.model_name`
+- `llm.judge_model`
+
+範例：
+
+```yaml
+llm:
+   api_key: "YOUR_GEMINI_API_KEY"
+   model_name: "models/gemini-3-flash-preview"
+   judge_model: "gemini-2.5-flash"
+```
+
+> `config.yaml` 已設為 git ignore，不會同步；請同步 `config.template.yaml`。
+
+（舊版環境變數寫法，保留參考）
 
 ```bash
 export NTU_SKELETON_DIR="/your/path/to/nturgb+d_skeletons"
+export ORANGE4HOME_DIR="/your/path/to/orange4home"
+export DALTON_DIR="/your/path/to/dalton-dataset-files"
 ```

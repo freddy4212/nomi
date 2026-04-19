@@ -40,22 +40,50 @@ if not project_root:
 
 # 1. Try to load config.yaml
 config_yaml_path = simulator_root / "config.yaml"
-yaml_dataset_path = None
+yaml_config = {}
+yaml_datasets = {}
+yaml_llm = {}
 
 if config_yaml_path.exists():
     try:
         with open(config_yaml_path, "r", encoding="utf-8") as f:
-            yaml_config = yaml.safe_load(f)
-            if yaml_config and "dataset" in yaml_config and "path" in yaml_config["dataset"]:
-                yaml_dataset_path = yaml_config["dataset"]["path"]
-                logger.info(f"Loaded dataset path from config.yaml: {yaml_dataset_path}")
+            yaml_config = yaml.safe_load(f) or {}
+            yaml_datasets = yaml_config.get("datasets", {}) or {}
+            yaml_llm = yaml_config.get("llm", {}) or {}
+
+            # Backward compatibility for old config format:
+            # dataset.path -> datasets.ntu_skeleton_dir
+            legacy_dataset = yaml_config.get("dataset", {}) or {}
+            if "ntu_skeleton_dir" not in yaml_datasets and "path" in legacy_dataset:
+                yaml_datasets["ntu_skeleton_dir"] = legacy_dataset["path"]
+
+            if yaml_datasets:
+                logger.info(f"Loaded datasets config from config.yaml: {yaml_datasets}")
+            if yaml_llm:
+                logger.info("Loaded llm config from config.yaml")
     except Exception as e:
         logger.error(f"Failed to load config.yaml: {e}")
+
+
+def _yaml_dataset_path(key: str):
+    """Resolve dataset path from config.yaml (absolute or relative to simulator root)."""
+    value = yaml_datasets.get(key)
+    if not value:
+        return None
+    p = Path(str(value))
+    if not p.is_absolute():
+        p = (simulator_root / p).resolve()
+    return str(p)
+
+
+yaml_ntu_path = _yaml_dataset_path("ntu_skeleton_dir")
+yaml_orange4home_path = _yaml_dataset_path("orange4home_dir")
+yaml_dalton_path = _yaml_dataset_path("dalton_dir")
 
 # Try to find the skeleton directory
 possible_paths = [
     # 0. YAML Config (Highest Priority)
-    yaml_dataset_path,
+    yaml_ntu_path,
     # 1. Environment variable
     os.getenv("NTU_SKELETON_DIR"),
     # 2. Standard location in workspace
@@ -87,7 +115,8 @@ else:
 
 # Orange4Home Config
 ORANGE4HOME_DIR = Path(
-    os.getenv(
+    yaml_orange4home_path
+    or os.getenv(
         "ORANGE4HOME_DIR",
         "/Users/freddy/Documents/260213_NOMI_evaluation/Orange4Home/orange4home"
     )
@@ -96,12 +125,23 @@ logger.info(f"Using Orange4Home Dir: {ORANGE4HOME_DIR}")
 
 # DALTON Config
 DALTON_DIR = Path(
-    os.getenv(
+    yaml_dalton_path
+    or os.getenv(
         "DALTON_DIR",
         "/Users/freddy/Documents/260213_NOMI_evaluation/DALTON/dalton-dataset-files"
     )
 )
 logger.info(f"Using DALTON Dir: {DALTON_DIR}")
+
+# LLM Judge Config (read from YAML only)
+GEMINI_API_KEY = str(yaml_llm.get("api_key", "")).strip()
+GEMINI_MODEL_NAME = str(yaml_llm.get("model_name", "gemini-2.0-flash")).strip()
+GEMINI_JUDGE_MODEL = str(yaml_llm.get("judge_model", GEMINI_MODEL_NAME)).strip()
+
+if GEMINI_API_KEY:
+    logger.info(f"LLM config loaded (model={GEMINI_MODEL_NAME}, judge_model={GEMINI_JUDGE_MODEL})")
+else:
+    logger.warning("LLM config missing: llm.api_key is empty in config.yaml")
 
 APP_NAME = "Virtual Endpoint Simulator"
 APP_VERSION = "0.2.0"
