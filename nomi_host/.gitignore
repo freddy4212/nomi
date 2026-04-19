@@ -26,4 +26,3 @@ pip-delete-this-directory.txt
 node_modules
 
 # NOMI HOST
-nomi_host/virtual_endpoint_simulator/evaluation/results/*.json

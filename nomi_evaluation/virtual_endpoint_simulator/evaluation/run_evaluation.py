@@ -27,7 +27,6 @@ NOMI Host Evaluation Harness
 import argparse
 import csv
 import json
-import os
 import sys
 import time
 from datetime import datetime
@@ -35,6 +34,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
+import yaml
 
 try:
     from google import genai
@@ -42,11 +42,23 @@ try:
 except ImportError:
     HAS_GENAI = False
 
-from dotenv import load_dotenv
 
-# Load .env from nomi_host root (two levels up from evaluation/)
-_env_path = Path(__file__).resolve().parents[2] / ".env"
-load_dotenv(_env_path)
+def _load_llm_from_yaml() -> Dict[str, str]:
+    """Load LLM config from simulator config.yaml (fallback-safe)."""
+    cfg_path = Path(__file__).resolve().parents[1] / "config.yaml"
+    if not cfg_path.exists():
+        return {}
+    try:
+        with open(cfg_path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+        return (data.get("llm") or {}) if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+_yaml_llm = _load_llm_from_yaml()
+GEMINI_API_KEY = str(_yaml_llm.get("api_key", "")).strip()
+GEMINI_MODEL_NAME = str(_yaml_llm.get("model_name", "gemini-1.5-flash")).strip()
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -157,8 +169,8 @@ class LLMJudge:
     """Use a separate LLM call to evaluate nomi_host inference results."""
 
     def __init__(self):
-        self.api_key = os.getenv("GEMINI_API_KEY")
-        self.model_name = os.getenv("GEMINI_MODEL_NAME", "gemini-1.5-flash")
+        self.api_key = GEMINI_API_KEY
+        self.model_name = GEMINI_MODEL_NAME or "gemini-1.5-flash"
         self.client = None
         self.enabled = False
         self._call_count = 0
@@ -1039,7 +1051,7 @@ def main():
         cprint(f"  ✅ Simulator: connected (running={status.get('is_running', False)})", Colors.GREEN)
     except Exception as e:
         cprint(f"  ❌ Simulator not reachable at {sim_url}: {e}", Colors.RED)
-        cprint(f"     Start it with: cd virtual_endpoint_simulator && bash start.sh", Colors.DIM)
+        cprint(f"     Start it with: cd nomi_evaluation/virtual_endpoint_simulator && bash start.sh", Colors.DIM)
         sys.exit(1)
 
     nomi_ok = nomi.health_check()

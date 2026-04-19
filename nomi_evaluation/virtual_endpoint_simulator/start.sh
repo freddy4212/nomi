@@ -2,6 +2,15 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
+FOREGROUND_LOGS=false
+
+for arg in "$@"; do
+  case "$arg" in
+    --foreground|--fg)
+      FOREGROUND_LOGS=true
+      ;;
+  esac
+done
 
 cleanup() {
   if [[ -n "${BACKEND_PID:-}" ]]; then
@@ -33,7 +42,15 @@ echo "Found available backend port: $BACKEND_PORT"
 # 啟動後端
 # 使用 nohup 讓它在背景執行
 # 使用 Unbuffered python (-u) 以確保 Log 即時寫入
-nohup python3 -u -m uvicorn backend.app.main:app --host 0.0.0.0 --port "$BACKEND_PORT" > "$BACKEND_LOG" 2>&1 &
+if [[ "$FOREGROUND_LOGS" == true ]]; then
+  echo "Backend log mode: foreground (also saved to $BACKEND_LOG)"
+  python3 -u -m uvicorn backend.app.main:app --host 0.0.0.0 --port "$BACKEND_PORT" \
+    > >(tee -a "$BACKEND_LOG") \
+    2> >(tee -a "$BACKEND_LOG" >&2) &
+else
+  echo "Backend log mode: background file only"
+  nohup python3 -u -m uvicorn backend.app.main:app --host 0.0.0.0 --port "$BACKEND_PORT" > "$BACKEND_LOG" 2>&1 &
+fi
 BACKEND_PID=$!
 
 echo "Backend running at http://127.0.0.1:$BACKEND_PORT"
@@ -42,7 +59,11 @@ echo "---------------------------------------------------"
 
 # 顯示後端啟動的前幾行 Log，確保已載入資料
 sleep 2
-head -n 20 "$BACKEND_LOG"
+if [[ "$FOREGROUND_LOGS" == true ]]; then
+  echo "Live backend logs are printing below."
+else
+  head -n 20 "$BACKEND_LOG"
+fi
 echo "---------------------------------------------------"
 
 echo "Starting frontend with API linked to backend..."

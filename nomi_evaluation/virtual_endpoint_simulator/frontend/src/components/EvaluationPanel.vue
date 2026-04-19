@@ -275,6 +275,7 @@ const chartRefs = {}
 
 // ─── State ──────────────────────────────────────────────────
 const conn = ref({ sim: false, nomi: false })
+const connPorts = ref({ sim: null, nomi: null })
 const runsPerScenario = ref(6)
 const isRunning = ref(false)
 const progress = ref(0)
@@ -369,8 +370,13 @@ async function checkConnectivity() {
     const r = await fetch(`${props.apiBase}/evaluation/connectivity`)
     const d = await r.json()
     conn.value = { sim: d.simulator?.connected, nomi: d.nomi_host?.connected }
+    connPorts.value = {
+      sim: d.simulator?.port ?? null,
+      nomi: d.nomi_host?.port ?? null,
+    }
   } catch {
     conn.value = { sim: false, nomi: false }
+    connPorts.value = { sim: null, nomi: null }
   }
 }
 
@@ -385,10 +391,11 @@ function startEvaluation() {
   mainTab.value = 'live'
 
   const params = new URLSearchParams({
-    sim_port: '8001', nomi_port: '8000',
     use_judge: 'true',
     runs: String(runsPerScenario.value),
   })
+  if (connPorts.value.sim != null) params.set('sim_port', String(connPorts.value.sim))
+  if (connPorts.value.nomi != null) params.set('nomi_port', String(connPorts.value.nomi))
   const es = new EventSource(`${props.apiBase}/evaluation/run?${params}`)
 
   let totalRuns = 1

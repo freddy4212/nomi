@@ -8,7 +8,7 @@ import asyncio
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import Response, StreamingResponse
 
 from .services.chart_service import (generate_all_scenarios_chart_png,
@@ -27,22 +27,40 @@ evaluation_router = APIRouter(prefix="/api/evaluation", tags=["evaluation"])
 _runner: Optional[EvaluationRunner] = None
 
 
+def _detect_nomi_port(start: int = 8000, end: int = 8099) -> Optional[int]:
+    """Find a reachable NOMI Host backend port by probing /health."""
+    for port in range(start, end + 1):
+        try:
+            if NomiHostClient(port).healthy():
+                return port
+        except Exception:
+            continue
+    return None
+
+
 # ── Health ───────────────────────────────────────────────────
 
 @evaluation_router.get("/connectivity")
 async def check_connectivity(
-    sim_port: int = Query(8001),
-    nomi_port: int = Query(8000),
+    request: Request,
+    sim_port: Optional[int] = Query(None),
+    nomi_port: Optional[int] = Query(None),
 ):
-    sim = SimulatorClient(sim_port)
-    nomi = NomiHostClient(nomi_port)
+    # Default simulator port to current backend port when not provided.
+    # This avoids stale hardcoded ports after dynamic startup.
+    effective_sim_port = sim_port or request.url.port or 8001
+    effective_nomi_port = nomi_port if nomi_port is not None else _detect_nomi_port()
+
+    sim = SimulatorClient(effective_sim_port)
+    nomi = NomiHostClient(effective_nomi_port) if effective_nomi_port else None
 
     # Run blocking HTTP checks in a thread pool to avoid self-deadlock
     loop = asyncio.get_event_loop()
-    sim_ok, nomi_ok = await asyncio.gather(
-        loop.run_in_executor(None, sim.healthy),
-        loop.run_in_executor(None, nomi.healthy),
-    )
+    sim_ok = await loop.run_in_executor(None, sim.healthy)
+    nomi_ok = False
+    if nomi is not None:
+        nomi_ok = await loop.run_in_executor(None, nomi.healthy)
+
     action_count = 0
     if sim_ok:
         try:
@@ -50,8 +68,8 @@ async def check_connectivity(
         except Exception:
             pass
     return {
-        "simulator": {"connected": sim_ok, "port": sim_port, "action_count": action_count},
-        "nomi_host": {"connected": nomi_ok, "port": nomi_port},
+        "simulator": {"connected": sim_ok, "port": effective_sim_port, "action_count": action_count},
+        "nomi_host": {"connected": nomi_ok, "port": effective_nomi_port},
     }
 
 
@@ -80,8 +98,9 @@ async def update_scenarios(data: dict):
 
 @evaluation_router.get("/run")
 async def run_evaluation(
-    sim_port: int = Query(8001),
-    nomi_port: int = Query(8000),
+    request: Request,
+    sim_port: Optional[int] = Query(None),
+    nomi_port: Optional[int] = Query(None),
     use_judge: bool = Query(True),
     runs: Optional[int] = Query(None, ge=1, le=20),
 ):
@@ -98,7 +117,12 @@ async def run_evaluation(
     if not categories:
         return {"error": "No categories defined"}
 
-    _runner = EvaluationRunner(sim_port, nomi_port, use_judge)
+    effective_sim_port = sim_port or request.url.port or 8001
+    effective_nomi_port = nomi_port if nomi_port is not None else _detect_nomi_port()
+    if effective_nomi_port is None:
+        return {"error": "NOMI Host not reachable on ports 8000-8099"}
+
+    _runner = EvaluationRunner(effective_sim_port, effective_nomi_port, use_judge)
 
     async def event_stream():
         async for event in _runner.run_full(scenarios_data, runs_override=runs):

@@ -19,8 +19,8 @@ logger = logging.getLogger("config")
 current_file = Path(__file__).resolve()
 project_root = None
 
-# Simulator Root (where config.yaml resides) should be 'nomi_host/virtual_endpoint_simulator'
-# We are in 'nomi_host/virtual_endpoint_simulator/backend/app/config.py'
+# Simulator Root (where config.yaml resides) should be 'nomi_evaluation/virtual_endpoint_simulator'
+# We are in 'nomi_evaluation/virtual_endpoint_simulator/backend/app/config.py'
 # So simulator root is ../..
 simulator_root = current_file.parents[2]
 

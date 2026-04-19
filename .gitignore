@@ -30,4 +30,4 @@ node_modules
 .env
 
 # NOMI Host
-nomi_host/virtual_endpoint_simulator/evaluation/results/*
+nomi_evaluation/virtual_endpoint_simulator/evaluation/results/*

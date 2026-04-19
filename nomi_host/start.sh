@@ -6,6 +6,15 @@ MEMORY_START_SCRIPT="$ROOT_DIR/memory_layer/container/start.sh"
 FRONTEND_DIR="$ROOT_DIR/control_panel/frontend"
 FRONTEND_ENV_FILE="$FRONTEND_DIR/.env.local"
 BACKEND_LOG_FILE="$ROOT_DIR/control_panel/backend/backend.log"
+FOREGROUND_LOGS=false
+
+for arg in "$@"; do
+  case "$arg" in
+    --foreground|--fg)
+      FOREGROUND_LOGS=true
+      ;;
+  esac
+done
 
 find_free_port() {
   local start_port="${1:-8000}"
@@ -76,10 +85,21 @@ EOF
 mkdir -p "$(dirname "$BACKEND_LOG_FILE")"
 
 echo "[3/3] Starting backend and frontend..."
-(
-  cd "$ROOT_DIR"
-  NOMI_BACKEND_PORT="$BACKEND_PORT" python -m control_panel.backend.main
-) > "$BACKEND_LOG_FILE" 2>&1 &
+if [[ "$FOREGROUND_LOGS" == true ]]; then
+  echo "Backend log mode: foreground (also saved to $BACKEND_LOG_FILE)"
+  (
+    cd "$ROOT_DIR"
+    NOMI_BACKEND_PORT="$BACKEND_PORT" python -m control_panel.backend.main \
+      > >(tee -a "$BACKEND_LOG_FILE") \
+      2> >(tee -a "$BACKEND_LOG_FILE" >&2)
+  ) &
+else
+  echo "Backend log mode: background file only"
+  (
+    cd "$ROOT_DIR"
+    NOMI_BACKEND_PORT="$BACKEND_PORT" python -m control_panel.backend.main
+  ) > "$BACKEND_LOG_FILE" 2>&1 &
+fi
 BACKEND_PID=$!
 
 echo "Backend PID: $BACKEND_PID"
