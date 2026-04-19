@@ -6,6 +6,7 @@ import yaml
 from google import genai
 from google.genai import types
 
+
 def _load_llm_config() -> Dict[str, str]:
     """Load LLM settings from nomi_host/config.yaml."""
     config_path = Path(__file__).resolve().parents[3] / "config.yaml"
