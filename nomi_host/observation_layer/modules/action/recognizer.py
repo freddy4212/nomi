@@ -14,7 +14,6 @@ recognizer.py - MMAction2 動作識別模組
 
 import threading
 import time
-from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -24,63 +23,12 @@ try:
 except ImportError:
     from observation_layer.config import config
 
-from collections import deque
-
-
-@dataclass
-class ActionResult:
-    """動作識別結果"""
-    person_id: int  # 人物 ID
-    action_label: str  # 動作標籤
-    action_description: str  # 動作描述
-    confidence: float  # 信心度
-    top_k_actions: List[Tuple[str, float]]  # Top-K
-    simplified_label: str = ""  # 簡化標籤
-    motion_status: str = ""     # 動作強度
-    duration: float = 0.0       # 該動作持續時間（秒）
-    is_stable: bool = False     # 動作是否已穩定
-    raw_scores: Optional[np.ndarray] = None
-
-
-class TemporalFilter:
-    """使用滑動窗口投票機制穩定識別結果"""
-    def __init__(self, window_size: int = 2, min_confidence: float = 0.3):
-        self.window_size = window_size
-        self.min_confidence = min_confidence
-        self.history = deque(maxlen=window_size)
-        self.current_stable_label = "等待中..."
-        self.current_stable_confidence = 0.0
-    
-    def update(self, label: str, confidence: float) -> Tuple[str, float]:
-        """添加新結果並返回穩定的結果"""
-        if confidence >= self.min_confidence:
-            self.history.append((label, confidence))
-        
-        if len(self.history) == 0:
-            return self.current_stable_label, self.current_stable_confidence
-        
-        # 使用加權投票：信心度作為權重
-        vote_scores = {}
-        for hist_label, hist_conf in self.history:
-            if hist_label not in vote_scores:
-                vote_scores[hist_label] = 0.0
-            vote_scores[hist_label] += hist_conf
-        
-        # 找出最高分的標籤
-        best_label = max(vote_scores, key=vote_scores.get)
-        # 計算平均信心度
-        label_count = sum(1 for l, _ in self.history if l == best_label)
-        avg_confidence = vote_scores[best_label] / label_count
-        
-        self.current_stable_label = best_label
-        self.current_stable_confidence = avg_confidence
-        
-        return best_label, avg_confidence
-    
-    def clear(self):
-        self.history.clear()
-        self.current_stable_label = "等待中..."
-        self.current_stable_confidence = 0.0
+try:
+    from .result import ActionResult
+    from .temporal_filter import TemporalFilter
+except ImportError:
+    from modules.action.result import ActionResult
+    from modules.action.temporal_filter import TemporalFilter
 
 
 class ActionRecognizer:

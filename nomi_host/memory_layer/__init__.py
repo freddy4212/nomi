@@ -29,10 +29,11 @@ NOMI Memory Layer Layer - 家庭代理人記憶層
 """
 
 from .config import MemoryConfig
-from .core import MemoryCore, MemoryStatus
+from .core import MemoryCore
 from .data_models import MemberState, PerceptionEvent
 from .database import DatabaseManager
 from .memory_layer import MemoryLayer
+from .status_models import MemoryStatus
 
 __version__ = "0.1.0"
 __all__ = [

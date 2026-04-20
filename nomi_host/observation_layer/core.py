@@ -25,7 +25,6 @@ import queue
 import sys
 import threading
 import time
-from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
 _base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -36,43 +35,18 @@ if os.path.join(_base_dir, 'mmaction2') not in sys.path:
 
 try:
     from .config import config
+    from .core_models import PersonActionInfo, ReceiverStatus
     from .modules.action.recognizer import ActionRecognizerAsync, ActionResult
     from .modules.memory import MemoryBridge, create_memory_bridge_if_available
     from .modules.network.receiver import FrameData, NetworkReceiver
     from .modules.skeleton.processor import SkeletonFrame, SkeletonProcessor
 except ImportError:
     from config import config
+    from core_models import PersonActionInfo, ReceiverStatus
     from modules.action.recognizer import ActionRecognizerAsync, ActionResult
     from modules.memory import MemoryBridge, create_memory_bridge_if_available
     from modules.network.receiver import FrameData, NetworkReceiver
     from modules.skeleton.processor import SkeletonFrame, SkeletonProcessor
-
-
-@dataclass
-class ReceiverStatus:
-    """Receiver 狀態資料"""
-    is_running: bool = False
-    is_connected: bool = False
-    frame_count: int = 0
-    fps: float = 0.0
-    persons_detected: int = 0
-    memory_events_sent: int = 0
-    last_error: Optional[str] = None
-
-
-@dataclass
-class PersonActionInfo:
-    """單一人物的動作識別結果"""
-    person_id: int
-    action_label: str = "等待識別"
-    confidence: float = 0.0
-    duration: float = 0.0
-    top_k_actions: List[tuple] = field(default_factory=list)
-    skeleton_status: str = "等待偵測..."
-    motion_status: str = "-"
-    bbox: Optional[tuple] = None
-    reid_name: Optional[str] = None
-    reid_confidence: float = 0.0
 
 
 class ReceiverCore(threading.Thread):

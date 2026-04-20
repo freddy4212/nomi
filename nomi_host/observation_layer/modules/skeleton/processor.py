@@ -11,56 +11,25 @@ processor.py - 骨架資料處理與補幀模組
 
 import time
 from collections import deque
-from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
 try:
     from ...config import config
+    from .analysis import analyze_visibility as _analyze_visibility
+    from .analysis import compute_motion_magnitude as _compute_motion_magnitude
     from .filters import SkeletonPreprocessor
+    from .models import PersonSkeleton, SkeletonFrame
 except ImportError:
     from observation_layer.config import config
+    from observation_layer.modules.skeleton.analysis import \
+        analyze_visibility as _analyze_visibility
+    from observation_layer.modules.skeleton.analysis import \
+        compute_motion_magnitude as _compute_motion_magnitude
     from observation_layer.modules.skeleton.filters import SkeletonPreprocessor
-
-
-@dataclass
-class PersonSkeleton:
-    """單一人物的骨架資料"""
-    person_id: int  # 人物 ID（來自追蹤）
-    box: Tuple[int, int, int, int]  # (x, y, w, h) 邊界框
-    score: float  # 檢測信心度
-    keypoints: np.ndarray  # shape: (17, 3) - (x, y, score) - 原始關鍵點
-    timestamp: float  # 時間戳
-    smoothed_keypoints: Optional[np.ndarray] = None  # 平滑後的關鍵點（用於補幀和動作識別）
-    reid_vector: Optional[np.ndarray] = None  # ReID 特徵向量
-    is_visible: bool = True  # 人物是否在畫面中
-    last_seen_time: float = 0.0  # 最後一次被偵測到的時間戳
-    disappear_direction: Optional[str] = None  # 消失方向 (left, right, top, bottom)
-    _visibility_event_sent: bool = False  # 內部標記：是否已發送離開事件
-    
-    def get_keypoints(self, use_smoothed: bool = False) -> np.ndarray:
-        """
-        獲取關鍵點
-        
-        Args:
-            use_smoothed: 是否使用平滑後的關鍵點
-            
-        Returns:
-            關鍵點陣列
-        """
-        if use_smoothed and self.smoothed_keypoints is not None:
-            return self.smoothed_keypoints
-        return self.keypoints
-
-
-@dataclass
-class SkeletonFrame:
-    """單一幀的所有人物骨架"""
-    timestamp: float
-    frame_no: int
-    persons: List[PersonSkeleton]
-    environment: Dict[str, Any] = field(default_factory=dict)
+    from observation_layer.modules.skeleton.models import (PersonSkeleton,
+                                                           SkeletonFrame)
 
 
 class SkeletonSmoother:
@@ -330,192 +299,7 @@ class SkeletonProcessor:
         Returns:
             可見性分析結果字典
         """
-        # 獲取最新的一幀
-        if not self.interpolated_buffer:
-            return {
-                'upper_visible': 0, 'lower_visible': 0,
-                'upper_ratio': 0.0, 'lower_ratio': 0.0,
-                'is_sitting_likely': False, 'is_full_body': False
-            }
-            
-        latest_frame = self.interpolated_buffer[-1]
-        target_person = None
-        for person in latest_frame.persons:
-            if person.person_id == person_id:
-                target_person = person
-                break
-        
-        if target_person is None:
-            return {
-                'upper_visible': 0, 'lower_visible': 0,
-                'upper_ratio': 0.0, 'lower_ratio': 0.0,
-                'is_sitting_likely': False, 'is_full_body': False
-            }
-            
-        keypoints = target_person.get_keypoints(use_smoothed=True)
-        
-        # 定義上半身和下半身索引
-        # COCO 格式: 0=鼻子, 1-4=眼睛耳朵, 5-10=肩膀手肘手腕, 11-12=髖部, 13-14=膝蓋, 15-16=腳踝
-        UPPER_BODY_INDICES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]  # 頭 + 手臂
-        LOWER_BODY_INDICES = [11, 12, 13, 14, 15, 16]  # 髖 + 腿
-        
-        confidence_threshold = 0.3
-        
-        # 計算上半身可見點數
-        upper_visible = sum(1 for i in UPPER_BODY_INDICES if keypoints[i, 2] >= confidence_threshold)
-        
-        # 計算下半身可見點數
-        lower_visible = sum(1 for i in LOWER_BODY_INDICES if keypoints[i, 2] >= confidence_threshold)
-        
-        upper_ratio = upper_visible / len(UPPER_BODY_INDICES)
-        lower_ratio = lower_visible / len(LOWER_BODY_INDICES)
-        
-        # === 基於骨架幾何的坐姿判斷 ===
-        is_sitting_likely = False
-        
-        # 方法 1: 下半身不可見（被桌子等遮擋）
-        if upper_ratio >= 0.5 and lower_ratio < 0.6:
-            is_sitting_likely = True
-        
-        # 方法 2: 基於關鍵點位置判斷（髖、膝、踝的相對位置）
-        # 坐著時，膝蓋和髖部的 Y 座標差距會比站著小很多
-        # 索引: 11=左髖, 12=右髖, 13=左膝, 14=右膝, 15=左踝, 16=右踝
-        if not is_sitting_likely and lower_ratio >= 0.5:
-            left_hip = keypoints[11]
-            right_hip = keypoints[12]
-            left_knee = keypoints[13]
-            right_knee = keypoints[14]
-            left_ankle = keypoints[15]
-            right_ankle = keypoints[16]
-            
-            # 檢查關鍵點是否有效
-            hip_valid = left_hip[2] >= confidence_threshold or right_hip[2] >= confidence_threshold
-            knee_valid = left_knee[2] >= confidence_threshold or right_knee[2] >= confidence_threshold
-            ankle_valid = left_ankle[2] >= confidence_threshold or right_ankle[2] >= confidence_threshold
-            
-            if hip_valid and knee_valid:
-                # 計算平均髖部和膝蓋 Y 座標
-                hip_y = 0
-                hip_count = 0
-                if left_hip[2] >= confidence_threshold:
-                    hip_y += left_hip[1]
-                    hip_count += 1
-                if right_hip[2] >= confidence_threshold:
-                    hip_y += right_hip[1]
-                    hip_count += 1
-                hip_y = hip_y / hip_count if hip_count > 0 else 0
-                
-                knee_y = 0
-                knee_count = 0
-                if left_knee[2] >= confidence_threshold:
-                    knee_y += left_knee[1]
-                    knee_count += 1
-                if right_knee[2] >= confidence_threshold:
-                    knee_y += right_knee[1]
-                    knee_count += 1
-                knee_y = knee_y / knee_count if knee_count > 0 else 0
-                
-                # 計算頭部 Y 座標（鼻子或肩膀作為備選）
-                nose_y = keypoints[0][1] if keypoints[0][2] >= confidence_threshold else 0
-                if nose_y == 0:
-                    # 嘗試用肩膀平均值
-                    left_shoulder = keypoints[5]
-                    right_shoulder = keypoints[6]
-                    if left_shoulder[2] >= confidence_threshold:
-                        nose_y = left_shoulder[1]
-                    elif right_shoulder[2] >= confidence_threshold:
-                        nose_y = right_shoulder[1]
-                
-                # 坐著時，髖部到膝蓋的距離會很小（接近水平）
-                # 站著時，髖部到膝蓋會有明顯的垂直距離
-                hip_knee_dist = abs(knee_y - hip_y)
-                
-                # 計算身體總高度（頭到髖的距離）作為參考
-                body_height = abs(hip_y - nose_y) if nose_y > 0 else 100
-                
-                # 正規化：坐著時 hip_knee_ratio 通常 < 0.5，站著時 > 0.6
-                hip_knee_ratio = hip_knee_dist / body_height if body_height > 0 else 0
-                
-                # 新增：大腿水平判斷 (Thigh Horizontal Check)
-                is_thigh_horizontal = False
-                if hip_valid and knee_valid:
-                    # 左大腿
-                    if left_hip[2] >= confidence_threshold and left_knee[2] >= confidence_threshold:
-                        l_dx = abs(left_knee[0] - left_hip[0])
-                        l_dy = abs(left_knee[1] - left_hip[1])
-                        if l_dx > l_dy * 1.0:
-                            is_thigh_horizontal = True
-                    # 右大腿
-                    if not is_thigh_horizontal and right_hip[2] >= confidence_threshold and right_knee[2] >= confidence_threshold:
-                        r_dx = abs(right_knee[0] - right_hip[0])
-                        r_dy = abs(right_knee[1] - right_hip[1])
-                        if r_dx > r_dy * 1.0:
-                            is_thigh_horizontal = True
-
-                # 另外檢查膝蓋的彎曲
-                if ankle_valid and knee_count > 0:
-                    ankle_y = 0
-                    ankle_count = 0
-                    if left_ankle[2] >= confidence_threshold:
-                        ankle_y += left_ankle[1]
-                        ankle_count += 1
-                    if right_ankle[2] >= confidence_threshold:
-                        ankle_y += right_ankle[1]
-                        ankle_count += 1
-                    ankle_y = ankle_y / ankle_count if ankle_count > 0 else 0
-                    
-                    knee_ankle_dist = abs(ankle_y - knee_y)
-                    
-                    if hip_knee_ratio < 0.55 and knee_ankle_dist < body_height * 0.55:
-                        is_sitting_likely = True
-                    elif hip_knee_ratio < 0.35:
-                        is_sitting_likely = True
-                    elif is_thigh_horizontal:
-                        is_sitting_likely = True
-                        
-                elif hip_knee_ratio < 0.45:
-                    is_sitting_likely = True
-                elif is_thigh_horizontal:
-                    is_sitting_likely = True
-                
-                # === 強制站立檢查 ===
-                if hip_knee_ratio > 0.7:
-                    is_sitting_likely = False
-        
-        # 方法 3: 基於邊界框比例判斷
-        if not is_sitting_likely and target_person.box is not None:
-            x, y, w, h = target_person.box
-            if w > 0:
-                aspect_ratio = h / w
-                # 放寬高寬比閾值 (1.2 -> 1.35)，適應坐姿挺直的情況
-                if aspect_ratio < 1.35:
-                    if lower_ratio < 0.6:
-                        is_sitting_likely = True
-                    elif aspect_ratio < 1.0:
-                        is_sitting_likely = True
-        
-        # 判斷是否全身可見
-        is_full_body = (upper_ratio >= 0.7 and lower_ratio >= 0.7)
-        
-        # 計算總可見點數和平均置信度
-        visible_mask = keypoints[:, 2] >= confidence_threshold
-        visible_count = int(np.sum(visible_mask))
-        avg_conf = float(np.mean(keypoints[visible_mask, 2])) if visible_count > 0 else 0.0
-        
-        # 判斷骨架是否有效 (簡單規則)
-        is_valid = (visible_count >= 5 and avg_conf >= 0.4)
-        
-        return {
-            'upper_visible': upper_visible,
-            'lower_visible': lower_visible,
-            'upper_ratio': upper_ratio,
-            'lower_ratio': lower_ratio,
-            'is_sitting_likely': is_sitting_likely,
-            'is_full_body': is_full_body,
-            'visible_count': visible_count,
-            'avg_conf': avg_conf,
-            'is_valid': is_valid
-        }
+        return _analyze_visibility(self.interpolated_buffer, person_id)
 
     def get_motion_magnitude(self, person_id: int) -> float:
         """
@@ -527,64 +311,7 @@ class SkeletonProcessor:
         Returns:
             動作幅度（歸一化單位/幀）
         """
-        if len(self.interpolated_buffer) < 5:
-            return 0.0
-            
-        # 收集該人物最近的關鍵點序列
-        recent_keypoints = []
-        # 取最近 15 幀（約 1 秒）
-        frames_to_check = list(self.interpolated_buffer)[-min(15, len(self.interpolated_buffer)):]
-        
-        target_person_latest = None
-        for frame in frames_to_check:
-            for person in frame.persons:
-                if person.person_id == person_id:
-                    recent_keypoints.append(person.get_keypoints(use_smoothed=True))
-                    target_person_latest = person
-                    break
-        
-        if len(recent_keypoints) < 2 or target_person_latest is None:
-            return 0.0
-            
-        # 獲取邊界框大小用於歸一化（解決遠近問題）
-        _, _, w, h = target_person_latest.box
-        bbox_diag = np.sqrt(w**2 + h**2)
-        if bbox_diag < 10: bbox_diag = 100.0
-            
-        # 定義穩定點 (肩膀、臀部、中心)
-        STABLE_POINTS = [5, 6, 11, 12]
-        
-        # 計算每幀之間的平均位移
-        total_motion = 0.0
-        count = 0
-        
-        for i in range(1, len(recent_keypoints)):
-            prev_kp = recent_keypoints[i-1]
-            curr_kp = recent_keypoints[i]
-            
-            # 計算這一幀的位移
-            frame_motion = 0.0
-            frame_count = 0
-            
-            for j in range(17):
-                if prev_kp[j, 2] > 0.3 and curr_kp[j, 2] > 0.3:
-                    dist = np.linalg.norm(curr_kp[j, :2] - prev_kp[j, :2])
-                    
-                    # 穩定點權重較高，末梢點權重較低（減少雜訊影響）
-                    weight = 2.0 if j in STABLE_POINTS else 0.5
-                    frame_motion += dist * weight
-                    frame_count += weight
-            
-            if frame_count > 0:
-                # 歸一化：位移相對於人體大小 (百分比)
-                normalized_motion = (frame_motion / frame_count) / bbox_diag * 1000
-                total_motion += normalized_motion
-                count += 1
-        
-        if count == 0:
-            return 0.0
-            
-        return total_motion / count
+        return _compute_motion_magnitude(self.interpolated_buffer, person_id)
         
     def debug_log(self, msg: str):
         """除錯日誌"""

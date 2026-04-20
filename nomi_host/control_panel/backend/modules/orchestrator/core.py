@@ -10,7 +10,6 @@ import asyncio
 import base64
 import json
 import time
-from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
 import cv2
@@ -24,15 +23,9 @@ except ImportError:
 from observation_layer.modules.visualization.visualizer import SkeletonPlayer
 
 from .layers import LayerManager
+from .models import DeviceInfo
 from .processor import DataProcessor
 
-
-@dataclass
-class DeviceInfo:
-    id: str = "Unknown"
-    name: str = "Unknown"
-    version: str = "Unknown"
-    model: str = "Unknown"
 
 class NOMIOrchestrator:
     def __init__(self):

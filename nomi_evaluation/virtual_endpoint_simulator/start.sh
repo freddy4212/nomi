@@ -2,12 +2,15 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
-FOREGROUND_LOGS=false
+FOREGROUND_LOGS=true
 
 for arg in "$@"; do
   case "$arg" in
     --foreground|--fg)
       FOREGROUND_LOGS=true
+      ;;
+    --silent|--quiet|--bg)
+      FOREGROUND_LOGS=false
       ;;
   esac
 done
@@ -44,12 +47,12 @@ echo "Found available backend port: $BACKEND_PORT"
 # 使用 Unbuffered python (-u) 以確保 Log 即時寫入
 if [[ "$FOREGROUND_LOGS" == true ]]; then
   echo "Backend log mode: foreground (also saved to $BACKEND_LOG)"
-  python3 -u -m uvicorn backend.app.main:app --host 0.0.0.0 --port "$BACKEND_PORT" \
+  PYTHONUNBUFFERED=1 python3 -u -m uvicorn backend.app.main:app --host 0.0.0.0 --port "$BACKEND_PORT" \
     > >(tee -a "$BACKEND_LOG") \
     2> >(tee -a "$BACKEND_LOG" >&2) &
 else
   echo "Backend log mode: background file only"
-  nohup python3 -u -m uvicorn backend.app.main:app --host 0.0.0.0 --port "$BACKEND_PORT" > "$BACKEND_LOG" 2>&1 &
+  nohup env PYTHONUNBUFFERED=1 python3 -u -m uvicorn backend.app.main:app --host 0.0.0.0 --port "$BACKEND_PORT" > "$BACKEND_LOG" 2>&1 &
 fi
 BACKEND_PID=$!
 
@@ -58,10 +61,10 @@ echo "Backend Logs are being written to: $BACKEND_LOG"
 echo "---------------------------------------------------"
 
 # 顯示後端啟動的前幾行 Log，確保已載入資料
-sleep 2
 if [[ "$FOREGROUND_LOGS" == true ]]; then
   echo "Live backend logs are printing below."
 else
+  sleep 2
   head -n 20 "$BACKEND_LOG"
 fi
 echo "---------------------------------------------------"

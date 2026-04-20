@@ -23,7 +23,6 @@ core.py - NOMI Memory Layer Layer 核心模組
 import queue
 import threading
 import time
-from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
 try:
@@ -31,24 +30,15 @@ try:
     from .data_models import MemberState, PerceptionEvent
     from .database import DatabaseManager
     from .memory_layer import MemoryLayer
+    from .status_helpers import build_status_snapshot, run_monitor_loop
+    from .status_models import MemoryStatus
 except (ImportError, ValueError):
     from config import memory_config
     from data_models import MemberState, PerceptionEvent
     from database import DatabaseManager
     from memory_layer import MemoryLayer
-
-
-@dataclass
-class MemoryStatus:
-    """記憶層狀態資料"""
-    is_running: bool = False
-    is_db_connected: bool = False
-    events_received: int = 0
-    events_written: int = 0
-    queue_size: int = 0
-    active_members: int = 0
-    db_type: str = "PostgreSQL"
-    db_error: Optional[str] = None
+    from status_helpers import build_status_snapshot, run_monitor_loop
+    from status_models import MemoryStatus
 
 
 class MemoryCore:
@@ -118,27 +108,7 @@ class MemoryCore:
     
     def get_status(self) -> MemoryStatus:
         """取得目前狀態"""
-        stats = self._memory_layer.get_statistics()
-        
-        with self._status_lock:
-            self._status.is_running = self._memory_layer.is_alive()
-            self._status.is_db_connected = self._memory_layer.is_db_connected
-            self._status.events_received = stats.get("events_received", 0)
-            self._status.events_written = stats.get("events_written", 0)
-            self._status.queue_size = stats.get("queue_size", 0)
-            self._status.active_members = stats.get("active_members", 0)
-            self._status.db_error = self._memory_layer.db_error
-            
-            return MemoryStatus(
-                is_running=self._status.is_running,
-                is_db_connected=self._status.is_db_connected,
-                events_received=self._status.events_received,
-                events_written=self._status.events_written,
-                queue_size=self._status.queue_size,
-                active_members=self._status.active_members,
-                db_type=self._status.db_type,
-                db_error=self._status.db_error,
-            )
+        return build_status_snapshot(self._memory_layer, self._status, self._status_lock)
     
     def get_active_states(self) -> Dict[int, MemberState]:
         """取得所有活躍成員的當前狀態"""
@@ -252,16 +222,12 @@ class MemoryCore:
     
     def _monitor_loop(self):
         """狀態監控迴圈"""
-        while not self._stop_monitor.is_set():
-            try:
-                # 定期更新狀態
-                self._notify_status_change()
-                
-            except Exception as e:
-                self.debug_log(f"Monitor error: {e}")
-            
-            # 每 2 秒更新一次
-            self._stop_monitor.wait(2.0)
+        run_monitor_loop(
+            stop_event=self._stop_monitor,
+            notify_status_change=self._notify_status_change,
+            debug_log=self.debug_log,
+            interval_sec=2.0,
+        )
 
 
 def run_headless():
